@@ -12,13 +12,15 @@
    為什麼拆成外部檔：之後改 CI 只要換一個 JSON，不必動程式碼，
    也不會有人改程式時順手把規範改壞。
 
-   座標與字級都以「設計稿尺寸」(refWidth × refHeight) 的像素為準；
-   實際底圖若是 2 倍、3 倍解析度，程式會依寬度比例自動換算。
+   座標與字級都以「輸出尺寸」(refWidth × refHeight) 的像素為準，也就是下載的那張圖。
+   輸出固定為 iPhone 18 Pro 螢幕比例（1206×2622）縮到 FHD 寬度：1080×2348（Leon 指定）。
+   上傳的底圖不論尺寸，都會自動置中裁切成這個比例。
    ========================================================================== */
 const CI_DEFAULT = {
   configSrc: "config/ci.json",
   refWidth: 1080,
-  refHeight: 1350,
+  refHeight: 2348,
+  output: { format: "jpg", quality: 0.92 },   // 下載格式：JPG，品質 0.92（肉眼看不出壓縮、檔案約 300～600KB）
   templateSrc: "",          // 留空 = 內建示範底圖
 
   // 開發者面板「發佈」時寫入的 GitHub repo（網站本身由 GitHub Pages 從這個 repo 提供）
@@ -28,8 +30,9 @@ const CI_DEFAULT = {
   // 華康原檔是 TTC 且 cmap 有瑕疵，瀏覽器會拒收，已用 tools/fixfont.py 修復成 woff2。
   fontLibrary: [
     { family: "Porsche Next",   label: "Porsche Next Regular", src: "fonts/PorscheNext-Regular.otf", script: "latin" },
-    { family: "DFHei Medium P", label: "華康中黑體(P)",         src: "fonts/DFHeiMediumP.woff2",     script: "cjk" },
-    { family: "DFHei Bold P",   label: "華康粗黑體(P)",         src: "fonts/DFHeiBoldP.woff2",       script: "cjk" }
+    // 華康切成約 500 字一包（tools/split_fonts.py），瀏覽器只下載姓名用到的那幾包，不必一次抓 3MB
+    { family: "DFHei Medium P", label: "華康中黑體(P)", chunks: "fonts/DFHeiMediumP/manifest.json", script: "cjk" },
+    { family: "DFHei Bold P",   label: "華康粗黑體(P)", chunks: "fonts/DFHeiBoldP/manifest.json",   script: "cjk" }
   ],
   fallbackFamily: "Noto Sans TC",          // CI 字型都沒有的罕用字才會用到
   coverageSrc: "fonts/coverage.txt",       // CI 字型涵蓋的字元清單，用來偵測罕用字
@@ -44,7 +47,7 @@ const CI_DEFAULT = {
     minFontSize: 48,             // 名字過長時最多縮到這裡；再長就擋下
     color: "#FFFFFF",
     x: 540,                      // 對齊點 X（center 時為中心點）
-    y: 742,                      // 文字基線 Y
+    y: 1241,                     // 文字基線 Y
     align: "center",             // left | center | right
     maxWidth: 820,
     letterSpacing: 2,
@@ -99,7 +102,11 @@ body { position: relative; margin: 0; background: var(--bg); color: var(--ink); 
   grid-template-columns: minmax(0, 360px) minmax(0, 1fr);
   align-items: start;
 }
-@media (max-width: 820px) { .wrap { grid-template-columns: minmax(0, 1fr); } .stage { order: -1; } }
+@media (max-width: 820px) {
+  .wrap { grid-template-columns: minmax(0, 1fr); }
+  .stage { order: -1; }
+  .stage #preview { max-height: 52vh; }
+}
 
 header h1 { margin: 0; font-size: 22px; font-weight: 700; letter-spacing: .02em; text-wrap: balance; }
 header p { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
@@ -119,6 +126,11 @@ header p { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
 #nameInput:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent); }
 #nameInput[aria-invalid="true"] { border-color: var(--bad); }
 
+/* App 內建瀏覽器警告：放在輸入框正上方，用警示色讓顧問一進來就看到 */
+.inapp { grid-column: 1 / -1; order: -2; border: 1.5px solid var(--warn); border-radius: 10px; padding: 14px 16px; display: grid; gap: 10px; background: color-mix(in srgb, var(--warn) 8%, var(--surface)); }
+.inapp p { margin: 0; font-size: 14px; }
+.inapp strong { display: block; color: var(--warn); font-size: 15px; margin-bottom: 2px; }
+.btnlink { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; font-weight: 500; border-radius: 8px; padding: 10px 16px; background: var(--warn); color: var(--surface); flex: 1 1 160px; }
 .msg { font-size: 13px; min-height: 1.6em; margin: 0; }
 .msg.ok { color: var(--ok); } .msg.warn { color: var(--warn); } .msg.bad { color: var(--bad); }
 
@@ -191,6 +203,7 @@ button.small { padding: 4px 10px; font-size: 12px; }
 .dlgbar p { margin: 0; font-size: 14px; min-width: 0; overflow-wrap: anywhere; }
 .dlgbar .actions { flex: 1 1 240px; justify-content: flex-end; }
 .dlgbar .actions button { flex: 1 1 0; }
+.dlghint { margin: 0; font-size: 13px; color: var(--muted); flex-basis: 100%; }
 .dlgbar small { display: block; color: var(--muted); font-family: var(--font-mono); font-size: 12px; }
 
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
@@ -209,10 +222,18 @@ button.small { padding: 4px 10px; font-size: 12px; }
 </form>
 
 <main class="wrap">
+  <div id="inAppWarn" class="inapp" role="alert" hidden>
+      <p><strong>請改用 Chrome 或 Safari 開啟</strong><span id="inAppName">LINE</span> 內建的瀏覽器無法下載圖片。請點右上角「⋯」選「用預設瀏覽器開啟」，或按下面的按鈕。</p>
+      <div class="actions">
+        <a id="openExternal" class="btnlink" href="#">用 Chrome／Safari 開啟</a>
+        <button id="copyUrlBtn" type="button">複製網址</button>
+      </div>
+    </div>
+
   <section class="panel" aria-label="操作">
     <header>
       <h1>邀請函姓名工具</h1>
-      <p>輸入客戶姓名，預覽確認後下載 PNG。字型、字級、顏色、位置依 CI 規範固定。</p>
+      <p>輸入客戶姓名，預覽確認後存到手機相簿。字型、字級、顏色、位置依 CI 規範固定。</p>
     </header>
 
     <div class="field">
@@ -225,7 +246,7 @@ button.small { padding: 4px 10px; font-size: 12px; }
     </div>
 
     <div class="actions">
-      <button id="previewBtn" class="primary" type="button">預覽並下載</button>
+      <button id="previewBtn" class="primary" type="button">預覽並存圖</button>
     </div>
     <p id="saveMsg" class="msg" role="status"></p>
 
@@ -253,7 +274,7 @@ button.small { padding: 4px 10px; font-size: 12px; }
           <div class="colorrow"><input id="d_color" type="color" aria-label="顏色選擇器"><input id="d_colorHex" type="text" maxlength="7" spellcheck="false"></div></div>
         <div class="ctl"><label for="d_prefix">前綴文字</label><input id="d_prefix" type="text"></div>
         <div class="ctl"><label for="d_suffix">後綴文字</label><input id="d_suffix" type="text"></div>
-        <div class="ctl wide"><label for="d_template">更換底圖（JPG／PNG，設計稿尺寸會改成這張圖的尺寸）</label><input id="d_template" type="file" accept="image/png,image/jpeg"></div>
+        <div class="ctl wide"><label for="d_template">更換底圖（JPG／PNG）建議 1080 × 2348 px 直式（iPhone 18 Pro 全螢幕比例）。其他尺寸會自動置中裁切成這個比例。</label><input id="d_template" type="file" accept="image/png,image/jpeg"></div>
         <div class="ctl wide"><label for="d_newpass">新密碼（選填，發佈時寫入）</label><input id="d_newpass" type="password" autocomplete="new-password"></div>
         <div class="ctl wide"><label for="d_token">GitHub 權杖（只存在這台電腦的瀏覽器，貼一次即可）</label><input id="d_token" type="password" autocomplete="off" spellcheck="false" placeholder="github_pat_…"></div>
       </div>
@@ -285,6 +306,7 @@ button.small { padding: 4px 10px; font-size: 12px; }
         <button id="dlgBack" type="button">返回修改</button>
         <button id="dlgSave" type="button" class="primary">確認下載</button>
       </div>
+      <p id="dlgHint" class="dlghint" hidden>按下後會出現分享選單，請點「儲存影像」，圖片就會存到相簿。</p>
     </div>
   </div>
 </dialog>
@@ -311,6 +333,15 @@ button.small { padding: 4px 10px; font-size: 12px; }
   };
   const N = () => state.ci.name;
 
+  // 裝置與瀏覽器偵測：只用來決定「怎麼存檔」和「要不要提醒換瀏覽器」
+  const UA = navigator.userAgent || "";
+  const IS_IOS = /iPhone|iPad|iPod/.test(UA) || (/Macintosh/.test(UA) && navigator.maxTouchPoints > 1);
+  const IS_ANDROID = /Android/.test(UA);
+  const IN_APP = /\bLine\//i.test(UA) ? "LINE"
+    : /FBAN|FBAV|FB_IAB/.test(UA) ? "Facebook"
+    : /Instagram/.test(UA) ? "Instagram"
+    : /MicroMessenger/.test(UA) ? "微信" : "";
+
   /* ---------- 小工具 ---------- */
   function setMsg(el, level, text) { el.className = `msg ${level || ""}`; el.textContent = text; }
   // 瀏覽器儲存在無痕模式或被封鎖時會丟例外，一律吞掉，功能照常只是不記憶
@@ -327,6 +358,18 @@ button.small { padding: 4px 10px; font-size: 12px; }
     }
     if (over.name && typeof over.name === "object") Object.assign(out.name, over.name);
     return out;
+  }
+  // 舊版設定的座標是以當時底圖的原尺寸為準。改成固定輸出尺寸後，
+  // 用同樣的 cover 裁切公式把座標換過來，位置才會跟畫面上看到的一致。
+  function normalizeConfig(cfg) {
+    const W = CI_DEFAULT.refWidth, H = CI_DEFAULT.refHeight;
+    if (cfg.refWidth === W && cfg.refHeight === H) return cfg;
+    const r = coverRect(cfg.refWidth, cfg.refHeight, W, H);
+    const n = cfg.name, round = (v) => Math.round(v * 10) / 10;
+    n.x = round(n.x * r.s - r.ox); n.y = round(n.y * r.s - r.oy);
+    for (const k of ["fontSize", "minFontSize", "maxWidth", "letterSpacing"]) n[k] = round(n[k] * r.s);
+    cfg.refWidth = W; cfg.refHeight = H;
+    return cfg;
   }
   async function sha256(text) {
     const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
@@ -382,9 +425,17 @@ button.small { padding: 4px 10px; font-size: 12px; }
     if (st) return Promise.resolve(st === "ok");
     const p = (async () => {
       try {
-        const face = new FontFace(f.family, `url("${f.src}")`);
-        await face.load();
-        document.fonts.add(face);
+        if (f.chunks) {
+          // 分包字型：先登記每一包的 unicode-range，不下載；真正用到哪些字，
+          // document.fonts.load() 才會去抓對應的那幾包
+          const base = f.chunks.slice(0, f.chunks.lastIndexOf("/") + 1);
+          const list = await (await fetch(f.chunks)).json();
+          for (const c of list) document.fonts.add(new FontFace(f.family, `url("${base}${c.file}")`, { unicodeRange: c.range }));
+        } else {
+          const face = new FontFace(f.family, `url("${f.src}")`);
+          await face.load();
+          document.fonts.add(face);
+        }
         state.fontStatus[family] = "ok";
         return true;
       } catch (e) { state.fontStatus[family] = "fail"; return false; }
@@ -434,6 +485,7 @@ button.small { padding: 4px 10px; font-size: 12px; }
      保證「看到的就是拿到的」。guides 只在開發模式的畫面預覽開啟。 */
   function drawDemoBackground(c, w, h) {
     const s = w / state.ci.refWidth, fb = state.ci.fallbackFamily;
+    c.translate(0, (h - 1350 * s) / 2);   // 示範圖案原本為 1080×1350 設計，垂直置中到直式畫面
     const g = c.createLinearGradient(0, 0, 0, h);
     g.addColorStop(0, "#22262B"); g.addColorStop(1, "#0E1013");
     c.fillStyle = g; c.fillRect(0, 0, w, h);
@@ -448,7 +500,7 @@ button.small { padding: 4px 10px; font-size: 12px; }
     c.fillRect(w / 2 - 300 * s, 780 * s, 600 * s, 1 * s);
     c.fillText("蒞臨指教", w / 2, 860 * s);
     c.font = `400 ${20 * s}px "IBM Plex Mono", monospace`; c.fillStyle = "rgba(255,255,255,.35)";
-    c.fillText("示範底圖 · 請替換為正式邀請函", w / 2, h - 80 * s);
+    c.fillText("示範底圖 · 請替換為正式邀請函", w / 2, 1300 * s);
   }
 
   // CI 通常要求字級一致，所以只往下縮、而且有下限；縮到下限還放不下就判定不合規。
@@ -464,16 +516,29 @@ button.small { padding: 4px 10px; font-size: 12px; }
     return { ok: false, size: n.minFontSize };
   }
 
+  // 「cover」裁切：把任意尺寸的圖等比放大到蓋滿 W×H，超出的部分從兩側（或上下）平均裁掉。
+  // 回傳來源圖要取的區塊，以及換算比例 s 與偏移 ox/oy（給舊座標換算用）。
+  function coverRect(iw, ih, W, H) {
+    const s = Math.max(W / iw, H / ih);
+    const sw = W / s, sh = H / s;
+    return { sx: (iw - sw) / 2, sy: (ih - sh) / 2, sw, sh, s, ox: (iw * s - W) / 2, oy: (ih * s - H) / 2 };
+  }
+
   function drawInvitation(c, text, valid, { guides = false } = {}) {
+    // 輸出尺寸永遠是設定的 refWidth × refHeight（1080×2348），不跟著底圖走，
+    // 這樣不管開發者上傳什麼尺寸，顧問下載的檔案規格都一致
     const img = state.template;
-    const w = img ? img.naturalWidth : state.ci.refWidth;
-    const h = img ? img.naturalHeight : state.ci.refHeight;
+    const w = state.ci.refWidth, h = state.ci.refHeight;
     if (c.canvas.width !== w) c.canvas.width = w;
     if (c.canvas.height !== h) c.canvas.height = h;
-    const scale = w / state.ci.refWidth, n = N();
+    const scale = 1, n = N();
 
-    c.save(); c.clearRect(0, 0, w, h);
-    if (img) c.drawImage(img, 0, 0, w, h); else drawDemoBackground(c, w, h);
+    c.save();
+    c.fillStyle = "#FFFFFF"; c.fillRect(0, 0, w, h);   // JPG 沒有透明，先鋪白底避免邊緣變黑
+    if (img) {
+      const r = coverRect(img.naturalWidth, img.naturalHeight, w, h);
+      c.drawImage(img, r.sx, r.sy, r.sw, r.sh, 0, 0, w, h);
+    } else drawDemoBackground(c, w, h);
     c.restore();
 
     let fit = null;
@@ -521,7 +586,7 @@ button.small { padding: 4px 10px; font-size: 12px; }
     else if (!fit.ok) setMsg(msg, "bad", `姓名太長，縮到最小字級 ${n.minFontSize}px 仍超出版面。`);
     else if (miss.length) setMsg(msg, "warn", `「${miss.join("、")}」不在 CI 字型字集內，已改用替代字型，請確認字形是否可接受。`);
     else if (fit.size < n.fontSize) setMsg(msg, "warn", `姓名較長，已自動縮為 ${fit.size}px（標準 ${n.fontSize}px）。`);
-    else setMsg(msg, "ok", "符合 CI 規範，可以預覽下載。");
+    else setMsg(msg, "ok", "符合 CI 規範，可以預覽存圖。");
     $("nameInput").setAttribute("aria-invalid", err || !fit.ok ? "true" : "false");
     $("previewBtn").disabled = !!err || !fit.ok;
     $("stageCaption").textContent = `${state.templateLabel} · ${w} × ${h}px${state.dev ? " · 開發模式（紫線不會輸出）" : ""}`;
@@ -543,7 +608,7 @@ button.small { padding: 4px 10px; font-size: 12px; }
       ["顏色", n.color],
       ["位置", `x ${n.x}, y ${n.y}（${{ left: "靠左", center: "置中", right: "靠右" }[n.align] || n.align}）`],
       ["寬度上限", `${n.maxWidth}px`],
-      ["設計稿", `${state.ci.refWidth} × ${state.ci.refHeight}px`]
+      ["輸出", `${state.ci.refWidth} × ${state.ci.refHeight}px JPG`]
     ];
     const dl = $("specList"); dl.replaceChildren();
     for (const [k, v] of rows) {
@@ -569,10 +634,6 @@ button.small { padding: 4px 10px; font-size: 12px; }
     try {
       state.template = await loadImage(state.ci.templateSrc);
       state.templateLabel = "正式底圖";
-      // 比例不同代表底圖和設定不是同一版，位置會偏，提醒但不阻擋
-      const want = state.ci.refWidth / state.ci.refHeight;
-      const got = state.template.naturalWidth / state.template.naturalHeight;
-      if (Math.abs(got - want) / want > 0.01) setMsg($("saveMsg"), "warn", "底圖比例與 CI 設計稿不同，姓名位置可能偏移，請通知負責人。");
     } catch (e) {
       setMsg($("saveMsg"), "bad", "正式底圖讀取失敗，暫時顯示示範底圖。請通知負責人。");
     }
@@ -597,7 +658,8 @@ button.small { padding: 4px 10px; font-size: 12px; }
     return "saved";
   }
   const saveResultText = (r, name) =>
-    r === "saved" ? ["ok", `已下載 ${name}`] :
+    r === "shared" ? ["ok", `已存好 ${name}，請到「照片」查看。`] :
+    r === "saved" ? ["ok", IS_ANDROID ? `已下載 ${name}，可在相簿的「Download」資料夾找到。` : `已下載 ${name}`] :
     r === "declined" ? ["warn", "已取消下載。"] :
     ["bad", "這個檢視模式無法下載，請改用一般瀏覽器開啟工具。"];
 
@@ -610,7 +672,7 @@ button.small { padding: 4px 10px; font-size: 12px; }
 
   function fileName() {
     const hon = $("honorific").value;
-    return `邀請函_${cleanName($("nameInput").value).replace(/[\\/:*?"<>|]/g, "")}${hon ? "_" + hon : ""}.png`;
+    return `邀請函_${cleanName($("nameInput").value).replace(/[\\/:*?"<>|]/g, "")}${hon ? "_" + hon : ""}.jpg`;
   }
   $("previewBtn").addEventListener("click", async () => {
     await render();
@@ -618,14 +680,30 @@ button.small { padding: 4px 10px; font-size: 12px; }
     const n = N(), name = cleanName($("nameInput").value);
     const { w, h } = drawInvitation(outCtx, composeText(name), true);
     $("dlgName").textContent = fileName();
-    $("dlgMeta").textContent = `${w} × ${h}px · 字級 ${state.fit.size}px${state.dev ? " · 開發中設定" : ""}`;
+    $("dlgMeta").textContent = `${w} × ${h}px JPG · 字級 ${state.fit.size}px${state.dev ? " · 開發中設定" : ""}`;
+    // 打開視窗時就先把 JPG 做好：iPhone 的分享選單必須在「按下按鈕的當下」叫出，
+    // 如果按下後才開始壓縮，Safari 會判定不是使用者操作而擋掉
+    state.outBlob = null;
+    const q = (state.ci.output && state.ci.output.quality) || 0.92;
+    state.outBlobPromise = new Promise((r) => outCanvas.toBlob(r, "image/jpeg", q)).then((b) => (state.outBlob = b));
+    const useShare = IS_IOS && !!navigator.canShare;
+    $("dlgSave").textContent = useShare ? "存到相簿" : "確認下載";
+    $("dlgHint").hidden = !useShare;
     $("confirmDlg").showModal();
   });
   $("dlgBack").addEventListener("click", () => $("confirmDlg").close());
   $("dlgSave").addEventListener("click", async () => {
-    const blob = await new Promise((r) => outCanvas.toBlob(r, "image/png"));
+    const blob = state.outBlob || await state.outBlobPromise;
     const name = fileName();
-    const r = await saveFile(name, blob);
+    let r;
+    const file = new File([blob], name, { type: "image/jpeg" });
+    if (IS_IOS && navigator.canShare && navigator.canShare({ files: [file] })) {
+      // iPhone：<a download> 只會存到「檔案」App；要進「照片」必須走分享選單的「儲存影像」
+      try { await navigator.share({ files: [file] }); r = "shared"; }
+      catch (e) { r = e && e.name === "AbortError" ? "declined" : "unavailable"; }
+    } else {
+      r = await saveFile(name, blob);
+    }
     $("confirmDlg").close();
     const [lv, t] = saveResultText(r, name);
     setMsg($("saveMsg"), lv, t);
@@ -697,22 +775,37 @@ button.small { padding: 4px 10px; font-size: 12px; }
     const file = e.target.files && e.target.files[0];
     if (!file) return;
     if (!/^image\/(png|jpeg)$/.test(file.type)) { setMsg($("devMsg"), "bad", "只接受 JPG 或 PNG 檔。"); return; }
+    let srcUrl = "";
     try {
-      const img = await loadImage(URL.createObjectURL(file));
-      // 新底圖的尺寸就是新的設計稿基準，之後量到的座標直接等於這張圖的像素。
-      // 舊數值依比例換到新尺寸，位置大致不跑掉，再微調即可。
-      const kx = img.naturalWidth / state.ci.refWidth, ky = img.naturalHeight / state.ci.refHeight;
-      const n = N();
-      for (const key of ["fontSize", "minFontSize", "x", "maxWidth", "letterSpacing"]) n[key] = Math.round(n[key] * kx * 10) / 10;
-      n.y = Math.round(n.y * ky);
-      state.ci.refWidth = img.naturalWidth; state.ci.refHeight = img.naturalHeight;
+      srcUrl = URL.createObjectURL(file);
+      const src = await loadImage(srcUrl);
+      // 在瀏覽器裡就先裁切、縮放成 1080×2348 的 JPG：
+      // 上傳到 GitHub 的檔案小、顧問端載入快，而且畫面上看到的裁切就是最終結果
+      const W = state.ci.refWidth, H = state.ci.refHeight;
+      const cv = document.createElement("canvas"); cv.width = W; cv.height = H;
+      const cx = cv.getContext("2d");
+      cx.fillStyle = "#FFFFFF"; cx.fillRect(0, 0, W, H);
+      cx.imageSmoothingQuality = "high";
+      const r = coverRect(src.naturalWidth, src.naturalHeight, W, H);
+      cx.drawImage(src, r.sx, r.sy, r.sw, r.sh, 0, 0, W, H);
+      const blob = await new Promise((res) => cv.toBlob(res, "image/jpeg", 0.92));
+      const name = file.name.replace(/\.[^.]+$/, "") + ".jpg";
+      const cropped = new File([blob], name, { type: "image/jpeg" });
+      if (state.devTemplate) URL.revokeObjectURL(state.devTemplate.img.src);
+      const img = await loadImage(URL.createObjectURL(cropped));
       state.template = img; state.templateLabel = `開發中底圖 ${file.name}`;
-      state.devTemplate = { img, file };
+      state.devTemplate = { img, file: cropped };
       $("devExportImgBtn").hidden = false;
-      syncDevInputs(); saveDevOverrides();
-      setMsg($("devMsg"), "ok", `已換上 ${file.name}（${img.naturalWidth}×${img.naturalHeight}）。底圖只在這次開啟期間有效，匯出時請一併下載。`);
+      const trimmed = Math.abs(src.naturalWidth / src.naturalHeight - W / H) > 0.005;
+      const small = src.naturalWidth < W || src.naturalHeight < H;
+      const notes = [`已換上 ${file.name}（原圖 ${src.naturalWidth}×${src.naturalHeight}）。`];
+      if (trimmed) notes.push("比例不同，已自動置中裁切。");
+      if (small) notes.push(`解析度低於 ${W}×${H}，輸出會略模糊，建議換高解析度原檔。`);
+      notes.push("確認後按「發佈給所有顧問」。");
+      setMsg($("devMsg"), small ? "warn" : "ok", notes.join(""));
       scheduleRender();
-    } catch (err) { setMsg($("devMsg"), "bad", "底圖讀取失敗。"); }
+    } catch (err) { setMsg($("devMsg"), "bad", "底圖讀取失敗，請確認是 JPG 或 PNG 檔。"); }
+    finally { if (srcUrl) URL.revokeObjectURL(srcUrl); }
   });
 
   // 把目前開發中的設定整理成要寫出的 ci.json。templatePath 由呼叫端決定（匯出與發佈的檔名規則不同）。
@@ -780,7 +873,7 @@ button.small { padding: 4px 10px; font-size: 12px; }
       const out = await buildConfigOut(templatePath);
       await ghPut(token, "config/ci.json", new TextEncoder().encode(JSON.stringify(out, null, 2) + "\n"), "更新邀請函 CI 設定");
       // 發佈成功：這份設定就是新的正式設定，本機的開發暫存可以清掉
-      state.official = mergeConfig(CI_DEFAULT, out);
+      state.official = normalizeConfig(mergeConfig(CI_DEFAULT, out));
       state.devTemplate = null; $("devExportImgBtn").hidden = true; $("d_template").value = ""; $("d_newpass").value = "";
       lsSet(DEV_KEY, null);
       if (templatePath) state.templateLabel = "正式底圖（剛發佈）";
@@ -819,7 +912,7 @@ button.small { padding: 4px 10px; font-size: 12px; }
     state.dev = true;
     let saved = null;
     try { saved = JSON.parse(lsGet(DEV_KEY) || "null"); } catch (e) {}
-    if (saved) state.ci = mergeConfig(state.official, saved);
+    if (saved && saved.name && saved.refWidth) state.ci = mergeConfig(state.official, normalizeConfig(saved));
     fillFontSelect($("d_cjk"), "cjk"); fillFontSelect($("d_latin"), "latin");
     syncDevInputs();
     $("d_token").placeholder = lsGet("invitationTool.githubToken") ? "已儲存（要換權杖再貼新的）" : "github_pat_…";
@@ -857,6 +950,23 @@ button.small { padding: 4px 10px; font-size: 12px; }
   });
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") $("unlockBox").hidden = true; });
 
+  /* ---------- App 內建瀏覽器提示 ----------
+     LINE 等 App 內建的瀏覽器不支援下載，顧問點了「下載」會沒反應。
+     LINE 官方支援網址加 openExternalBrowser=1，點了就會改用手機預設瀏覽器開啟。 */
+  if (IN_APP) {
+    $("inAppName").textContent = IN_APP;
+    $("inAppWarn").hidden = false;
+    const u = new URL(location.href);
+    u.searchParams.set("openExternalBrowser", "1");
+    $("openExternal").href = u.toString();
+    if (IN_APP !== "LINE") $("openExternal").hidden = true;   // 只有 LINE 認得這個參數
+  }
+  $("copyUrlBtn").addEventListener("click", async () => {
+    const url = location.origin + location.pathname;
+    try { await navigator.clipboard.writeText(url); $("copyUrlBtn").textContent = "已複製"; }
+    catch (e) { window.prompt && window.prompt("請複製網址", url); }
+  });
+
   /* ---------- 啟動 ---------- */
   $("nameInput").addEventListener("input", scheduleRender);
   $("honorific").addEventListener("change", scheduleRender);
@@ -866,7 +976,7 @@ button.small { padding: 4px 10px; font-size: 12px; }
     try {
       // 加時間參數繞過 GitHub Pages 的 10 分鐘快取，開發者一發佈，顧問重新整理就拿得到
       const res = await fetch(`${CI_DEFAULT.configSrc}?t=${Date.now()}`, { cache: "no-store" });
-      if (res.ok) { state.official = mergeConfig(CI_DEFAULT, await res.json()); state.officialSource = "config/ci.json"; }
+      if (res.ok) { state.official = normalizeConfig(mergeConfig(CI_DEFAULT, await res.json())); state.officialSource = "config/ci.json"; }
     } catch (e) { /* 沒有 ci.json（例如示範頁）就用內建預設 */ }
     state.ci = clone(state.official);
     fillHonorifics();
