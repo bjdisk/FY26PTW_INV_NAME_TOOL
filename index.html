@@ -6,9 +6,7 @@
 </head>
 <body>
 <title>邀請函姓名工具</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="icon" href="data:,">
 
 <script>
 /* ==========================================================================
@@ -36,13 +34,13 @@ const CI_DEFAULT = {
   // 可用字型庫。開發者面板只能從這裡挑，避免選到未授權或不支援中文的字型。
   // 華康原檔是 TTC 且 cmap 有瑕疵，瀏覽器會拒收，已用 tools/fixfont.py 修復成 woff2。
   fontLibrary: [
-    { family: "Porsche Next",   label: "Porsche Next Regular", src: "fonts/PorscheNext-Regular.otf", script: "latin" },
+    { family: "Porsche Next",   label: "Porsche Next Regular", src: "fonts/PorscheNext-Regular.woff2", script: "latin" },
     // 華康切成約 500 字一包（tools/split_fonts.py），瀏覽器只下載姓名用到的那幾包，不必一次抓 3MB
     { family: "DFHei Medium P", label: "華康中黑體(P)", chunks: "fonts/DFHeiMediumP/manifest.json", script: "cjk" },
     { family: "DFHei Bold P",   label: "華康粗黑體(P)", chunks: "fonts/DFHeiBoldP/manifest.json",   script: "cjk" }
   ],
-  fallbackFamily: "Noto Sans TC",          // CI 字型都沒有的罕用字才會用到
-  coverageSrc: "fonts/coverage.txt",       // CI 字型涵蓋的字元清單，用來偵測罕用字
+  // CI 字型都沒有的罕用字才會用到：直接用手機內建的中文字型，不另外下載
+  fallbackStack: `"PingFang TC", "Noto Sans CJK TC", "Microsoft JhengHei", sans-serif`,
 
   // 開發者密碼的 SHA-256（不存明碼）。密碼由 Leon 指定；要改密碼請用開發者面板的「新密碼」欄位匯出。
   devPasscodeHash: "0a0667865bc17f9d624bcf11088057bbab46336e7dae65f3d5366f4f7a18333e",
@@ -83,8 +81,8 @@ const CI_DEFAULT = {
   --bad: #B3261E;
   --stage: #D9DDE2;
   --scrim: rgba(12, 14, 18, .72);
-  --font-ui: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif;
-  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  --font-ui: "PingFang TC", "Noto Sans CJK TC", "Microsoft JhengHei", system-ui, sans-serif;
+  --font-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
@@ -360,7 +358,7 @@ button.small { padding: 4px 10px; font-size: 12px; }
   function mergeConfig(base, over) {
     const out = clone(base);
     if (!over || typeof over !== "object") return out;
-    for (const k of ["refWidth", "refHeight", "templateSrc", "github", "devPasscodeHash", "fontLibrary", "fallbackFamily", "coverageSrc"]) {
+    for (const k of ["refWidth", "refHeight", "templateSrc", "github", "devPasscodeHash", "output"]) {
       if (over[k] !== undefined) out[k] = over[k];
     }
     if (over.name && typeof over.name === "object") Object.assign(out.name, over.name);
@@ -437,6 +435,7 @@ button.small { padding: 4px 10px; font-size: 12px; }
           // document.fonts.load() 才會去抓對應的那幾包
           const base = f.chunks.slice(0, f.chunks.lastIndexOf("/") + 1);
           const list = await (await fetch(f.chunks)).json();
+          coverageOf[f.family] = parseRanges(list.map((c) => c.range).join(","));
           for (const c of list) document.fonts.add(new FontFace(f.family, `url("${base}${c.file}")`, { unicodeRange: c.range }));
         } else {
           const face = new FontFace(f.family, `url("${f.src}")`);
@@ -450,8 +449,7 @@ button.small { padding: 4px 10px; font-size: 12px; }
     state.fontStatus[family] = p;
     return p;
   }
-  const familyStack = () =>
-    `"${N().latinFont}", "${N().cjkFont}", "${state.ci.fallbackFamily}", "PingFang TC", "Microsoft JhengHei", sans-serif`;
+  const familyStack = () => `"${N().latinFont}", "${N().cjkFont}", ${CI_DEFAULT.fallbackStack}`;
   const fontString = (px) => `${px}px ${familyStack()}`;
   async function ensureFonts(text) {
     await Promise.all([loadFont(N().latinFont), loadFont(N().cjkFont)]);
@@ -459,24 +457,22 @@ button.small { padding: 4px 10px; font-size: 12px; }
   }
 
   // 罕用字偵測：CI 字型（華康 Big5 字集）沒有的字會落到替代字型。不擋下載，但要讓顧問知道。
-  let coverage = null;
-  async function loadCoverage() {
-    if (!state.ci.coverageSrc) return;
-    try {
-      const res = await fetch(state.ci.coverageSrc);
-      if (!res.ok) return;
-      coverage = (await res.text()).trim().split(" ").map((t) => {
-        const [a, len] = t.split("+"); const s = parseInt(a, 16);
-        return [s, s + (len ? parseInt(len, 16) : 0)];
-      });
-    } catch (e) { coverage = null; }
+  // 字碼範圍表：family -> 排序過的 [起, 迄]。Porsche Next 涵蓋的拉丁字母（含重音字母）一律視為有字。
+  const coverageOf = {};
+  const LATIN = [[0x20, 0x24F]];
+  function parseRanges(css) {
+    return css.split(",").map((t) => {
+      const [a, b] = t.trim().slice(2).split("-");
+      return [parseInt(a, 16), parseInt(b || a, 16)];
+    }).sort((x, y) => x[0] - y[0]);
   }
   function uncovered(text) {
+    const coverage = coverageOf[N().cjkFont];
     if (!coverage) return [];
     const miss = new Set();
     for (const ch of text) {
       const c = ch.codePointAt(0);
-      if (c === 32) continue;
+      if (c <= LATIN[0][1]) continue;
       let lo = 0, hi = coverage.length - 1, hit = false;
       while (lo <= hi) {
         const mid = (lo + hi) >> 1;
@@ -491,7 +487,7 @@ button.small { padding: 4px 10px; font-size: 12px; }
      drawInvitation 是唯一的出圖邏輯：畫面預覽、確認視窗、下載檔案都用它，
      保證「看到的就是拿到的」。guides 只在開發模式的畫面預覽開啟。 */
   function drawDemoBackground(c, w, h) {
-    const s = w / state.ci.refWidth, fb = state.ci.fallbackFamily;
+    const s = w / state.ci.refWidth, fb = "PingFang TC\", \"Noto Sans CJK TC\", \"Microsoft JhengHei";
     c.translate(0, (h - 1350 * s) / 2);   // 示範圖案原本為 1080×1350 設計，垂直置中到直式畫面
     const g = c.createLinearGradient(0, 0, 0, h);
     g.addColorStop(0, "#22262B"); g.addColorStop(1, "#0E1013");
@@ -506,7 +502,7 @@ button.small { padding: 4px 10px; font-size: 12px; }
     c.fillText("誠摯邀請", w / 2, 620 * s);
     c.fillRect(w / 2 - 300 * s, 780 * s, 600 * s, 1 * s);
     c.fillText("蒞臨指教", w / 2, 860 * s);
-    c.font = `400 ${20 * s}px "IBM Plex Mono", monospace`; c.fillStyle = "rgba(255,255,255,.35)";
+    c.font = `400 ${20 * s}px ui-monospace, Menlo, monospace`; c.fillStyle = "rgba(255,255,255,.35)";
     c.fillText("示範底圖 · 請替換為正式邀請函", w / 2, 1300 * s);
   }
 
@@ -531,6 +527,26 @@ button.small { padding: 4px 10px; font-size: 12px; }
     return { sx: (iw - sw) / 2, sy: (ih - sh) / 2, sw, sh, s, ox: (iw * s - W) / 2, oy: (ih * s - H) / 2 };
   }
 
+  // 每次打字都重新裁切縮放一張 1080×2348 的底圖很浪費（中階手機約 100ms），
+  // 所以底圖畫好一次就存起來，之後只要整張貼上去再寫字
+  let bgCache = { img: undefined, w: 0, h: 0, canvas: null };
+  function backgroundFor(img, w, h) {
+    if (bgCache.canvas && bgCache.img === img && bgCache.w === w && bgCache.h === h) return bgCache.canvas;
+    const cv = bgCache.canvas || document.createElement("canvas");
+    cv.width = w; cv.height = h;
+    const c = cv.getContext("2d");
+    c.save();
+    c.fillStyle = "#FFFFFF"; c.fillRect(0, 0, w, h);   // JPG 沒有透明，先鋪白底避免邊緣變黑
+    if (img) {
+      c.imageSmoothingQuality = "high";
+      const r = coverRect(img.naturalWidth, img.naturalHeight, w, h);
+      c.drawImage(img, r.sx, r.sy, r.sw, r.sh, 0, 0, w, h);
+    } else drawDemoBackground(c, w, h);
+    c.restore();
+    bgCache = { img, w, h, canvas: cv };
+    return cv;
+  }
+
   function drawInvitation(c, text, valid, { guides = false } = {}) {
     // 輸出尺寸永遠是設定的 refWidth × refHeight（1080×2348），不跟著底圖走，
     // 這樣不管開發者上傳什麼尺寸，顧問下載的檔案規格都一致
@@ -540,13 +556,7 @@ button.small { padding: 4px 10px; font-size: 12px; }
     if (c.canvas.height !== h) c.canvas.height = h;
     const scale = 1, n = N();
 
-    c.save();
-    c.fillStyle = "#FFFFFF"; c.fillRect(0, 0, w, h);   // JPG 沒有透明，先鋪白底避免邊緣變黑
-    if (img) {
-      const r = coverRect(img.naturalWidth, img.naturalHeight, w, h);
-      c.drawImage(img, r.sx, r.sy, r.sw, r.sh, 0, 0, w, h);
-    } else drawDemoBackground(c, w, h);
-    c.restore();
+    c.drawImage(backgroundFor(img, w, h), 0, 0);
 
     let fit = null;
     if (valid) {
@@ -818,7 +828,7 @@ button.small { padding: 4px 10px; font-size: 12px; }
   // 把目前開發中的設定整理成要寫出的 ci.json。templatePath 由呼叫端決定（匯出與發佈的檔名規則不同）。
   async function buildConfigOut(templatePath) {
     const out = mergeConfig(state.official, { name: N(), refWidth: state.ci.refWidth, refHeight: state.ci.refHeight });
-    delete out.configSrc;
+    delete out.configSrc; delete out.fontLibrary; delete out.fallbackStack;
     if (templatePath) out.templateSrc = templatePath;
     const np = $("d_newpass").value;
     if (np) out.devPasscodeHash = await sha256(np);
@@ -987,7 +997,7 @@ button.small { padding: 4px 10px; font-size: 12px; }
     } catch (e) { /* 沒有 ci.json（例如示範頁）就用內建預設 */ }
     state.ci = clone(state.official);
     fillHonorifics();
-    await Promise.all([applyOfficialTemplate(), loadCoverage()]);
+    await applyOfficialTemplate();
     scheduleRender();
   })();
 })();

@@ -6,7 +6,7 @@
 ## 檔案
 - `index.html`：網站首頁，由 `sh build.sh` 從 `src/app.html` 產生。
 - `config/ci.json`：正式 CI 設定。開發者面板按「發佈給所有顧問」會直接改寫這個檔案。
-- `fonts/`：Porsche Next Regular、華康中黑體(P)／粗黑體(P)。華康已修復 cmap，並切成約 500 字一包（`fonts/DFHeiMediumP/`），網頁只下載姓名用到的那幾包。`coverage.txt` 用來偵測罕用字。
+- `fonts/`：Porsche Next Regular（woff2）、華康中黑體(P)／粗黑體(P)。華康已修復 cmap，並切成約 500 字一包（`fonts/DFHeiMediumP/`），網頁只下載姓名用到的那幾包。`coverage.txt` 用來偵測罕用字。
 - `template/`：正式底圖，開發者面板發佈時會自動上傳到這裡。
 - `tools/fixfont.py`：把華康 TTC 修成瀏覽器可用的 woff2。
 - `tools/split_fonts.py`：把 woff2 切成小包並產生 manifest.json。
