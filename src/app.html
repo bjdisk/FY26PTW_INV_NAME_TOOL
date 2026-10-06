@@ -1,0 +1,877 @@
+<title>邀請函姓名工具</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+
+<script>
+/* ==========================================================================
+   CI 設定：內建預設值
+   --------------------------------------------------------------------------
+   正式數值放在 config/ci.json（開發者面板「匯出 ci.json」產生的就是它）。
+   頁面啟動時先讀 ci.json，讀不到才用這裡的預設值。
+   為什麼拆成外部檔：之後改 CI 只要換一個 JSON，不必動程式碼，
+   也不會有人改程式時順手把規範改壞。
+
+   座標與字級都以「設計稿尺寸」(refWidth × refHeight) 的像素為準；
+   實際底圖若是 2 倍、3 倍解析度，程式會依寬度比例自動換算。
+   ========================================================================== */
+const CI_DEFAULT = {
+  configSrc: "config/ci.json",
+  refWidth: 1080,
+  refHeight: 1350,
+  templateSrc: "",          // 留空 = 內建示範底圖
+
+  // 開發者面板「發佈」時寫入的 GitHub repo（網站本身由 GitHub Pages 從這個 repo 提供）
+  github: { owner: "bjdisk", repo: "FY26PTW_INV_NAME_TOOL", branch: "main" },
+
+  // 可用字型庫。開發者面板只能從這裡挑，避免選到未授權或不支援中文的字型。
+  // 華康原檔是 TTC 且 cmap 有瑕疵，瀏覽器會拒收，已用 tools/fixfont.py 修復成 woff2。
+  fontLibrary: [
+    { family: "Porsche Next",   label: "Porsche Next Regular", src: "fonts/PorscheNext-Regular.otf", script: "latin" },
+    { family: "DFHei Medium P", label: "華康中黑體(P)",         src: "fonts/DFHeiMediumP.woff2",     script: "cjk" },
+    { family: "DFHei Bold P",   label: "華康粗黑體(P)",         src: "fonts/DFHeiBoldP.woff2",       script: "cjk" }
+  ],
+  fallbackFamily: "Noto Sans TC",          // CI 字型都沒有的罕用字才會用到
+  coverageSrc: "fonts/coverage.txt",       // CI 字型涵蓋的字元清單，用來偵測罕用字
+
+  // 開發者密碼的 SHA-256（不存明碼）。密碼由 Leon 指定；要改密碼請用開發者面板的「新密碼」欄位匯出。
+  devPasscodeHash: "0a0667865bc17f9d624bcf11088057bbab46336e7dae65f3d5366f4f7a18333e",
+
+  name: {
+    latinFont: "Porsche Next",   // 英文字母用
+    cjkFont: "DFHei Medium P",   // 中文用
+    fontSize: 72,                // 標準字級（設計稿 px）
+    minFontSize: 48,             // 名字過長時最多縮到這裡；再長就擋下
+    color: "#FFFFFF",
+    x: 540,                      // 對齊點 X（center 時為中心點）
+    y: 742,                      // 文字基線 Y
+    align: "center",             // left | center | right
+    maxWidth: 820,
+    letterSpacing: 2,
+    prefix: "",                  // 例："敬邀 "
+    suffix: "",                  // 例：" 先生／女士"
+    maxUnits: 20,                // 字數上限：中文（全形）算 2、英文／數字／空白（半形）算 1；20 = 10 個中文字
+    honorifics: ["", "先生", "女士"],   // 稱謂選單；"" = 不加稱謂（英文名也用中文稱謂）
+    honorificSeparator: " "      // 姓名與稱謂之間空一格：「陳美玲 女士」
+  }
+};
+</script>
+
+<style>
+/* 版面：左側操作欄 + 右側大預覽；手機時預覽在上、操作在下。開發者面板接在操作欄下方。 */
+:root {
+  --bg: #EEF0F2;
+  --surface: #FFFFFF;
+  --ink: #15181C;
+  --muted: #5D6672;
+  --line: #D5DAE0;
+  --accent: #2C4A6E;
+  --accent-ink: #FFFFFF;
+  --dev: #7A4BB0;
+  --ok: #2E7D4F;
+  --warn: #A3591A;
+  --bad: #B3261E;
+  --stage: #D9DDE2;
+  --scrim: rgba(12, 14, 18, .72);
+  --font-ui: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111418; --surface: #1A1E24; --ink: #E8EBEF; --muted: #98A2AE; --line: #2C333C;
+    --accent: #8FB0D6; --accent-ink: #0F1720; --dev: #C3A3EA; --ok: #6CC495; --warn: #E0A15F; --bad: #F08C84;
+    --stage: #0B0D10; --scrim: rgba(0, 0, 0, .8); color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #111418; --surface: #1A1E24; --ink: #E8EBEF; --muted: #98A2AE; --line: #2C333C;
+  --accent: #8FB0D6; --accent-ink: #0F1720; --dev: #C3A3EA; --ok: #6CC495; --warn: #E0A15F; --bad: #F08C84;
+  --stage: #0B0D10; --scrim: rgba(0, 0, 0, .8); color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { position: relative; margin: 0; background: var(--bg); color: var(--ink); font-family: var(--font-ui); font-size: 15px; line-height: 1.6; }
+.wrap {
+  max-width: 1180px; margin: 0 auto;
+  padding-inline: 16px; padding-block: 24px 40px;
+  display: grid; gap: 24px;
+  grid-template-columns: minmax(0, 360px) minmax(0, 1fr);
+  align-items: start;
+}
+@media (max-width: 820px) { .wrap { grid-template-columns: minmax(0, 1fr); } .stage { order: -1; } }
+
+header h1 { margin: 0; font-size: 22px; font-weight: 700; letter-spacing: .02em; text-wrap: balance; }
+header p { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
+.panel { display: grid; gap: 20px; min-width: 0; }
+
+.field { display: grid; gap: 8px; }
+.field > label { font-size: 13px; font-weight: 500; color: var(--muted); letter-spacing: .04em; }
+.namerow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+#honorific {
+  font: inherit; font-size: 18px; padding: 0 10px; min-width: 88px;
+  border: 1.5px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink);
+}
+#nameInput {
+  width: 100%; font: inherit; font-size: 20px; padding: 12px 14px;
+  border: 1.5px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink);
+}
+#nameInput:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent); }
+#nameInput[aria-invalid="true"] { border-color: var(--bad); }
+
+.msg { font-size: 13px; min-height: 1.6em; margin: 0; }
+.msg.ok { color: var(--ok); } .msg.warn { color: var(--warn); } .msg.bad { color: var(--bad); }
+
+.actions { display: flex; flex-wrap: wrap; gap: 10px; }
+button {
+  font: inherit; font-weight: 500; border-radius: 8px; padding: 10px 16px; cursor: pointer;
+  border: 1.5px solid var(--line); background: var(--surface); color: var(--ink);
+}
+button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); flex: 1 1 160px; }
+button:disabled { opacity: .45; cursor: not-allowed; }
+button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px solid color-mix(in srgb, var(--accent) 45%, transparent); outline-offset: 2px; }
+
+.spec { border-top: 1px solid var(--line); padding-top: 16px; display: grid; gap: 10px; }
+.spec h2, .dev h2 { margin: 0; font-size: 12px; font-weight: 500; color: var(--muted); letter-spacing: .12em; }
+.spec dl { margin: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 14px; font-size: 13px; }
+.spec dt { color: var(--muted); }
+.spec dd { margin: 0; font-family: var(--font-mono); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; display: flex; align-items: center; gap: 8px; }
+.swatch { width: 14px; height: 14px; border-radius: 3px; border: 1px solid var(--line); flex: none; }
+.lock { font-size: 12px; color: var(--muted); }
+
+/* 開發者面板：用紫色虛線框，讓人一眼知道「這裡的改動不是正式設定」 */
+.dev { border: 1.5px dashed var(--dev); border-radius: 10px; padding: 16px; display: grid; gap: 14px; }
+.dev h2 { color: var(--dev); display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.dev .note { margin: 0; font-size: 12px; color: var(--muted); }
+.grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 12px; }
+.ctl { display: grid; gap: 4px; min-width: 0; }
+.ctl label { font-size: 12px; color: var(--muted); }
+.ctl input, .ctl select {
+  font: inherit; font-size: 14px; padding: 7px 9px; width: 100%; min-width: 0;
+  border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink);
+}
+.ctl input[type="number"] { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.ctl input[type="color"] { padding: 2px; height: 36px; }
+.ctl.wide { grid-column: 1 / -1; }
+.colorrow { display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 8px; }
+.dev .actions button { flex: 1 1 140px; font-size: 14px; }
+button.devbtn { border-color: var(--dev); color: var(--dev); }
+button.small { padding: 4px 10px; font-size: 12px; }
+
+/* 開發者入口：左上角小圖示，刻意低調，顧問不會注意到也不會誤按 */
+#devEntry {
+  position: absolute; top: calc(env(safe-area-inset-top, 0px) + 6px); left: 6px; z-index: 5;
+  width: 28px; height: 28px; padding: 0; border: none; border-radius: 6px;
+  background: transparent; color: var(--muted); opacity: .35; display: grid; place-items: center;
+}
+#devEntry:hover, #devEntry:focus-visible { opacity: 1; }
+#devEntry svg { width: 16px; height: 16px; }
+.unlock {
+  position: absolute; top: calc(env(safe-area-inset-top, 0px) + 40px); left: 8px; z-index: 6;
+  width: min(320px, calc(100% - 16px)); background: var(--surface);
+  box-shadow: 0 8px 30px rgba(0,0,0,.18);
+  display: grid; gap: 8px; border: 1.5px dashed var(--dev); border-radius: 10px; padding: 16px;
+}
+.unlock label { font-size: 13px; color: var(--dev); font-weight: 500; }
+.unlock .row { display: flex; gap: 8px; }
+.unlock input { flex: 1; min-width: 0; font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink); }
+
+.stage { background: var(--stage); border-radius: 10px; padding: 16px; display: grid; place-items: center; min-width: 0; margin: 0; }
+#preview { display: block; max-width: 100%; max-height: 78vh; height: auto; width: auto; box-shadow: 0 6px 30px rgba(0,0,0,.18); }
+#preview.draggable { cursor: crosshair; touch-action: none; }
+.stage figcaption { margin-top: 10px; font-size: 12px; color: var(--muted); text-align: center; font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+/* 預覽確認視窗：顯示的是實際要輸出的那張圖（不含開發輔助線） */
+#confirmDlg { border: none; padding: 0; background: transparent; max-width: 100vw; max-height: 100vh; width: 100%; height: 100%; }
+#confirmDlg::backdrop { background: var(--scrim); }
+.dlgbox { height: 100%; display: grid; grid-template-rows: minmax(0, 1fr) auto; gap: 14px; padding-inline: 16px; padding-block: calc(16px + env(safe-area-inset-top, 0px)) calc(16px + env(safe-area-inset-bottom, 0px)); }
+.dlgimg { min-height: 0; display: grid; place-items: center; }
+.dlgimg canvas { max-width: 100%; max-height: calc(100vh - 170px); max-height: calc(100dvh - 170px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)); width: auto; height: auto; box-shadow: 0 10px 40px rgba(0,0,0,.4); }
+.dlgbar { background: var(--surface); color: var(--ink); border-radius: 10px; padding: 14px 16px; display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; justify-content: space-between; max-width: 720px; width: 100%; margin: 0 auto; }
+.dlgbar p { margin: 0; font-size: 14px; min-width: 0; overflow-wrap: anywhere; }
+.dlgbar .actions { flex: 1 1 240px; justify-content: flex-end; }
+.dlgbar .actions button { flex: 1 1 0; }
+.dlgbar small { display: block; color: var(--muted); font-family: var(--font-mono); font-size: 12px; }
+
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<button id="devEntry" type="button" aria-label="開發者面板" title="開發者面板">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+</button>
+<form id="unlockBox" class="unlock" hidden>
+  <label for="passInput">開發者密碼</label>
+  <div class="row">
+    <input id="passInput" type="password" autocomplete="off">
+    <button type="submit" class="devbtn">解鎖</button>
+  </div>
+  <p id="unlockMsg" class="msg" role="status"></p>
+</form>
+
+<main class="wrap">
+  <section class="panel" aria-label="操作">
+    <header>
+      <h1>邀請函姓名工具</h1>
+      <p>輸入客戶姓名，預覽確認後下載 PNG。字型、字級、顏色、位置依 CI 規範固定。</p>
+    </header>
+
+    <div class="field">
+      <label for="nameInput">客戶姓名</label>
+      <div class="namerow">
+        <input id="nameInput" type="text" autocomplete="off" spellcheck="false" value="王小明" aria-describedby="nameMsg">
+        <select id="honorific" aria-label="稱謂"></select>
+      </div>
+      <p id="nameMsg" class="msg" role="status"></p>
+    </div>
+
+    <div class="actions">
+      <button id="previewBtn" class="primary" type="button">預覽並下載</button>
+    </div>
+    <p id="saveMsg" class="msg" role="status"></p>
+
+    <section class="spec" aria-label="CI 規範">
+      <h2>CI 規範　<span class="lock" id="specSource">已鎖定</span></h2>
+      <dl id="specList"></dl>
+    </section>
+
+    <section id="devPanel" class="dev" aria-label="開發者面板" hidden>
+      <h2>開發者面板 <button id="devLockBtn" type="button" class="devbtn small">鎖定</button></h2>
+      <p class="note">調整會即時顯示在預覽上，但只有你看得到。確認沒問題後按「發佈給所有顧問」，約 1～2 分鐘後顧問重新整理就會套用。也可以直接在預覽圖上拖曳調整位置。</p>
+
+      <div class="grid2">
+        <div class="ctl"><label for="d_cjk">中文字型</label><select id="d_cjk"></select></div>
+        <div class="ctl"><label for="d_latin">英文字型</label><select id="d_latin"></select></div>
+        <div class="ctl"><label for="d_size">字級 px</label><input id="d_size" type="number" min="8" max="400" step="1"></div>
+        <div class="ctl"><label for="d_min">最小字級 px</label><input id="d_min" type="number" min="8" max="400" step="1"></div>
+        <div class="ctl"><label for="d_x">X</label><input id="d_x" type="number" step="1"></div>
+        <div class="ctl"><label for="d_y">Y（基線）</label><input id="d_y" type="number" step="1"></div>
+        <div class="ctl"><label for="d_maxw">最大寬度 px</label><input id="d_maxw" type="number" min="10" step="1"></div>
+        <div class="ctl"><label for="d_ls">字距 px</label><input id="d_ls" type="number" step="0.5"></div>
+        <div class="ctl"><label for="d_align">對齊</label>
+          <select id="d_align"><option value="left">靠左</option><option value="center">置中</option><option value="right">靠右</option></select></div>
+        <div class="ctl"><label for="d_colorHex">顏色</label>
+          <div class="colorrow"><input id="d_color" type="color" aria-label="顏色選擇器"><input id="d_colorHex" type="text" maxlength="7" spellcheck="false"></div></div>
+        <div class="ctl"><label for="d_prefix">前綴文字</label><input id="d_prefix" type="text"></div>
+        <div class="ctl"><label for="d_suffix">後綴文字</label><input id="d_suffix" type="text"></div>
+        <div class="ctl wide"><label for="d_template">更換底圖（JPG／PNG，設計稿尺寸會改成這張圖的尺寸）</label><input id="d_template" type="file" accept="image/png,image/jpeg"></div>
+        <div class="ctl wide"><label for="d_newpass">新密碼（選填，發佈時寫入）</label><input id="d_newpass" type="password" autocomplete="new-password"></div>
+        <div class="ctl wide"><label for="d_token">GitHub 權杖（只存在這台電腦的瀏覽器，貼一次即可）</label><input id="d_token" type="password" autocomplete="off" spellcheck="false" placeholder="github_pat_…"></div>
+      </div>
+
+      <div class="actions">
+        <button id="devPublishBtn" type="button" class="primary">發佈給所有顧問</button>
+      </div>
+      <div class="actions">
+        <button id="devExportBtn" type="button" class="devbtn">匯出 ci.json（備用）</button>
+        <button id="devExportImgBtn" type="button" class="devbtn" hidden>下載新底圖</button>
+        <button id="devResetBtn" type="button">還原正式設定</button>
+      </div>
+      <p id="devMsg" class="msg" role="status"></p>
+    </section>
+  </section>
+
+  <figure class="stage">
+    <canvas id="preview" width="1080" height="1350" aria-label="邀請函預覽"></canvas>
+    <figcaption id="stageCaption"></figcaption>
+  </figure>
+</main>
+
+<dialog id="confirmDlg" aria-label="預覽確認">
+  <div class="dlgbox">
+    <div class="dlgimg" id="dlgImg"></div>
+    <div class="dlgbar">
+      <p><span id="dlgName"></span><small id="dlgMeta"></small></p>
+      <div class="actions">
+        <button id="dlgBack" type="button">返回修改</button>
+        <button id="dlgSave" type="button" class="primary">確認下載</button>
+      </div>
+    </div>
+  </div>
+</dialog>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const canvas = $("preview");
+  const ctx = canvas.getContext("2d");
+  const clone = (o) => JSON.parse(JSON.stringify(o));
+  const DEV_KEY = "invitationTool.devOverrides";
+  const DEV_UNLOCK_KEY = "invitationTool.devUnlocked";
+
+  const state = {
+    official: clone(CI_DEFAULT),   // 正式設定（內建預設 ← config/ci.json）
+    ci: clone(CI_DEFAULT),         // 目前生效的設定（開發模式時 = 正式 + 開發改動）
+    officialSource: "內建預設值",
+    template: null,                // HTMLImageElement；null 時畫示範底圖
+    templateLabel: "示範底圖",
+    devTemplate: null,             // 開發者上傳的底圖 { img, file }
+    dev: false,
+    fontStatus: {},                // family -> Promise | "ok" | "fail"
+    fit: null
+  };
+  const N = () => state.ci.name;
+
+  /* ---------- 小工具 ---------- */
+  function setMsg(el, level, text) { el.className = `msg ${level || ""}`; el.textContent = text; }
+  // 瀏覽器儲存在無痕模式或被封鎖時會丟例外，一律吞掉，功能照常只是不記憶
+  function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+  function lsSet(k, v) { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch (e) {} }
+  function ssGet(k) { try { return sessionStorage.getItem(k); } catch (e) { return null; } }
+  function ssSet(k, v) { try { v == null ? sessionStorage.removeItem(k) : sessionStorage.setItem(k, v); } catch (e) {} }
+  // ci.json 是外部檔案：只接受已知欄位，避免一個打錯的鍵把整個設定弄壞
+  function mergeConfig(base, over) {
+    const out = clone(base);
+    if (!over || typeof over !== "object") return out;
+    for (const k of ["refWidth", "refHeight", "templateSrc", "github", "devPasscodeHash", "fontLibrary", "fallbackFamily", "coverageSrc"]) {
+      if (over[k] !== undefined) out[k] = over[k];
+    }
+    if (over.name && typeof over.name === "object") Object.assign(out.name, over.name);
+    return out;
+  }
+  async function sha256(text) {
+    const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+    return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  }
+
+  /* ---------- 姓名清理與驗證 ----------
+     顧問常從 LINE 或 CRM 複製姓名，容易夾帶前後空白、全形空白、
+     換行或零寬字元，肉眼看不到但會讓置中偏掉。 */
+  function cleanName(raw) {
+    return raw.replace(/[​-‍﻿\u0000-\u001F]/g, "").replace(/[\s　]+/g, " ").trim();
+  }
+  const NAME_OK = /^[\p{L}\p{M} ·・.'’\-]+$/u;
+  // 實際畫上去的整串文字：前綴 + 姓名 + 稱謂 + 後綴（只有姓名和稱謂是顧問能選的）
+  function composeText(name) {
+    const n = N(), hon = $("honorific").value;
+    return `${n.prefix}${name}${hon ? n.honorificSeparator + hon : ""}${n.suffix}`;
+  }
+  function fillHonorifics() {
+    const sel = $("honorific"), cur = sel.value;
+    sel.replaceChildren(...N().honorifics.map((h) => {
+      const o = document.createElement("option"); o.value = h; o.textContent = h || "（不加稱謂）"; return o;
+    }));
+    if (N().honorifics.includes(cur)) sel.value = cur;
+  }
+
+  // 字數計算沿用台灣慣用的「全形 2、半形 1」：中文、日韓文、全形標點佔兩格，其餘一格。
+  // 這樣一條規則就同時管住中文名（最多 10 字）和英文名（最多 20 個字母含空白）。
+  const WIDE = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}　-〿＀-￯]/u;
+  function nameUnits(name) {
+    let u = 0;
+    for (const ch of name) u += WIDE.test(ch) ? 2 : 1;
+    return u;
+  }
+
+  function validate(name) {
+    if (!name) return "請輸入客戶姓名。";
+    const units = nameUnits(name), max = N().maxUnits;
+    if (units > max) return `姓名太長：上限 ${max} 字元（中文 1 字算 2），目前 ${units}。`;
+    if (!NAME_OK.test(name)) return "姓名含有不允許的符號或表情符號，請只保留文字。";
+    return null;
+  }
+
+  /* ---------- 字型 ----------
+     只載入目前用到的字型：華康一套約 3MB，手機上沒必要兩套都抓。
+     Canvas 不會等字型下載，所以畫之前要主動 load。 */
+  const libEntry = (family) => state.ci.fontLibrary.find((f) => f.family === family);
+  function loadFont(family) {
+    const f = libEntry(family);
+    if (!f) return Promise.resolve(false);
+    const st = state.fontStatus[family];
+    if (st instanceof Promise) return st;
+    if (st) return Promise.resolve(st === "ok");
+    const p = (async () => {
+      try {
+        const face = new FontFace(f.family, `url("${f.src}")`);
+        await face.load();
+        document.fonts.add(face);
+        state.fontStatus[family] = "ok";
+        return true;
+      } catch (e) { state.fontStatus[family] = "fail"; return false; }
+    })();
+    state.fontStatus[family] = p;
+    return p;
+  }
+  const familyStack = () =>
+    `"${N().latinFont}", "${N().cjkFont}", "${state.ci.fallbackFamily}", "PingFang TC", "Microsoft JhengHei", sans-serif`;
+  const fontString = (px) => `${px}px ${familyStack()}`;
+  async function ensureFonts(text) {
+    await Promise.all([loadFont(N().latinFont), loadFont(N().cjkFont)]);
+    try { await document.fonts.load(fontString(N().fontSize), text || "A"); } catch (e) {}
+  }
+
+  // 罕用字偵測：CI 字型（華康 Big5 字集）沒有的字會落到替代字型。不擋下載，但要讓顧問知道。
+  let coverage = null;
+  async function loadCoverage() {
+    if (!state.ci.coverageSrc) return;
+    try {
+      const res = await fetch(state.ci.coverageSrc);
+      if (!res.ok) return;
+      coverage = (await res.text()).trim().split(" ").map((t) => {
+        const [a, len] = t.split("+"); const s = parseInt(a, 16);
+        return [s, s + (len ? parseInt(len, 16) : 0)];
+      });
+    } catch (e) { coverage = null; }
+  }
+  function uncovered(text) {
+    if (!coverage) return [];
+    const miss = new Set();
+    for (const ch of text) {
+      const c = ch.codePointAt(0);
+      if (c === 32) continue;
+      let lo = 0, hi = coverage.length - 1, hit = false;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        if (c < coverage[mid][0]) hi = mid - 1; else if (c > coverage[mid][1]) lo = mid + 1; else { hit = true; break; }
+      }
+      if (!hit) miss.add(ch);
+    }
+    return [...miss];
+  }
+
+  /* ---------- 繪製 ----------
+     drawInvitation 是唯一的出圖邏輯：畫面預覽、確認視窗、下載檔案都用它，
+     保證「看到的就是拿到的」。guides 只在開發模式的畫面預覽開啟。 */
+  function drawDemoBackground(c, w, h) {
+    const s = w / state.ci.refWidth, fb = state.ci.fallbackFamily;
+    const g = c.createLinearGradient(0, 0, 0, h);
+    g.addColorStop(0, "#22262B"); g.addColorStop(1, "#0E1013");
+    c.fillStyle = g; c.fillRect(0, 0, w, h);
+    c.textAlign = "center"; c.textBaseline = "alphabetic";
+    const ls = (px) => { if ("letterSpacing" in c) c.letterSpacing = `${px * s}px`; };
+    ls(8); c.fillStyle = "rgba(255,255,255,.55)"; c.font = `300 ${26 * s}px "${fb}", sans-serif`;
+    c.fillText("INVITATION", w / 2, 300 * s);
+    ls(6); c.fillStyle = "rgba(255,255,255,.85)"; c.font = `300 ${44 * s}px "${fb}", sans-serif`;
+    c.fillText("新車品鑑會", w / 2, 400 * s);
+    c.fillStyle = "rgba(255,255,255,.5)"; c.font = `300 ${24 * s}px "${fb}", sans-serif`;
+    c.fillText("誠摯邀請", w / 2, 620 * s);
+    c.fillRect(w / 2 - 300 * s, 780 * s, 600 * s, 1 * s);
+    c.fillText("蒞臨指教", w / 2, 860 * s);
+    c.font = `400 ${20 * s}px "IBM Plex Mono", monospace`; c.fillStyle = "rgba(255,255,255,.35)";
+    c.fillText("示範底圖 · 請替換為正式邀請函", w / 2, h - 80 * s);
+  }
+
+  // CI 通常要求字級一致，所以只往下縮、而且有下限；縮到下限還放不下就判定不合規。
+  function layout(c, text, scale) {
+    const n = N(), max = n.maxWidth * scale;
+    const hasLS = "letterSpacing" in c;
+    for (let size = n.fontSize; size >= n.minFontSize; size -= 1) {
+      c.font = fontString(size * scale);
+      if (hasLS) c.letterSpacing = `${n.letterSpacing * scale}px`;
+      const w = c.measureText(text).width;
+      if (w <= max) return { ok: true, size, width: w };
+    }
+    return { ok: false, size: n.minFontSize };
+  }
+
+  function drawInvitation(c, text, valid, { guides = false } = {}) {
+    const img = state.template;
+    const w = img ? img.naturalWidth : state.ci.refWidth;
+    const h = img ? img.naturalHeight : state.ci.refHeight;
+    if (c.canvas.width !== w) c.canvas.width = w;
+    if (c.canvas.height !== h) c.canvas.height = h;
+    const scale = w / state.ci.refWidth, n = N();
+
+    c.save(); c.clearRect(0, 0, w, h);
+    if (img) c.drawImage(img, 0, 0, w, h); else drawDemoBackground(c, w, h);
+    c.restore();
+
+    let fit = null;
+    if (valid) {
+      c.save();
+      fit = layout(c, text, scale);
+      if (fit.ok) {
+        c.fillStyle = n.color; c.textAlign = n.align; c.textBaseline = "alphabetic";
+        c.fillText(text, n.x * scale, n.y * scale);
+      }
+      c.restore();
+    }
+    if (guides) {
+      // 開發輔助線：最大寬度範圍 + 對齊點。只畫在畫面預覽，不會出現在下載檔。
+      const x = n.x * scale, y = n.y * scale, mw = n.maxWidth * scale, fs = n.fontSize * scale;
+      const left = n.align === "center" ? x - mw / 2 : n.align === "right" ? x - mw : x;
+      c.save();
+      c.strokeStyle = "rgba(195,163,234,.95)"; c.lineWidth = Math.max(1, 2 * scale);
+      c.setLineDash([8 * scale, 6 * scale]);
+      c.strokeRect(left, y - fs, mw, fs * 1.25);
+      c.setLineDash([]);
+      c.beginPath(); c.moveTo(x - 14 * scale, y); c.lineTo(x + 14 * scale, y); c.moveTo(x, y - 14 * scale); c.lineTo(x, y + 14 * scale); c.stroke();
+      c.restore();
+    }
+    return { fit, w, h };
+  }
+
+  /* ---------- 畫面預覽 ---------- */
+  let drawToken = 0;
+  async function render() {
+    const token = ++drawToken;
+    const n = N();
+    const name = cleanName($("nameInput").value);
+    const text = composeText(name);
+    await ensureFonts(text);
+    if (token !== drawToken) return;   // 使用者打字很快時，只畫最後一次
+
+    const err = validate(name);
+    const { fit, w, h } = drawInvitation(ctx, text, !err, { guides: state.dev });
+    state.fit = err ? null : fit;
+
+    const msg = $("nameMsg");
+    const miss = err ? [] : uncovered(text);
+    if (err) setMsg(msg, "bad", err);
+    else if (!fit.ok) setMsg(msg, "bad", `姓名太長，縮到最小字級 ${n.minFontSize}px 仍超出版面。`);
+    else if (miss.length) setMsg(msg, "warn", `「${miss.join("、")}」不在 CI 字型字集內，已改用替代字型，請確認字形是否可接受。`);
+    else if (fit.size < n.fontSize) setMsg(msg, "warn", `姓名較長，已自動縮為 ${fit.size}px（標準 ${n.fontSize}px）。`);
+    else setMsg(msg, "ok", "符合 CI 規範，可以預覽下載。");
+    $("nameInput").setAttribute("aria-invalid", err || !fit.ok ? "true" : "false");
+    $("previewBtn").disabled = !!err || !fit.ok;
+    $("stageCaption").textContent = `${state.templateLabel} · ${w} × ${h}px${state.dev ? " · 開發模式（紫線不會輸出）" : ""}`;
+    renderSpec();
+  }
+  let raf = 0;
+  const scheduleRender = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(render); };
+
+  /* ---------- 規範欄 ---------- */
+  function renderSpec() {
+    const n = N();
+    const label = (fam) => {
+      const f = libEntry(fam);
+      return (f ? f.label : fam) + (state.fontStatus[fam] === "fail" ? "（未載入）" : "");
+    };
+    const rows = [
+      ["字型", `${label(n.latinFont)} / ${label(n.cjkFont)}`],
+      ["字級", `${n.fontSize}px（最小 ${n.minFontSize}px）`],
+      ["顏色", n.color],
+      ["位置", `x ${n.x}, y ${n.y}（${{ left: "靠左", center: "置中", right: "靠右" }[n.align] || n.align}）`],
+      ["寬度上限", `${n.maxWidth}px`],
+      ["設計稿", `${state.ci.refWidth} × ${state.ci.refHeight}px`]
+    ];
+    const dl = $("specList"); dl.replaceChildren();
+    for (const [k, v] of rows) {
+      const dt = document.createElement("dt"); dt.textContent = k;
+      const dd = document.createElement("dd");
+      if (k === "顏色") { const s = document.createElement("span"); s.className = "swatch"; s.style.background = v; dd.append(s); }
+      dd.append(v); dl.append(dt, dd);
+    }
+    $("specSource").textContent = state.dev ? "開發中（未部署）" : `已鎖定 · ${state.officialSource}`;
+  }
+
+  /* ---------- 底圖 ---------- */
+  function loadImage(src) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img); img.onerror = () => reject(new Error("load failed"));
+      img.src = src;
+    });
+  }
+  async function applyOfficialTemplate() {
+    state.template = null; state.templateLabel = "示範底圖";
+    if (!state.ci.templateSrc) return;
+    try {
+      state.template = await loadImage(state.ci.templateSrc);
+      state.templateLabel = "正式底圖";
+      // 比例不同代表底圖和設定不是同一版，位置會偏，提醒但不阻擋
+      const want = state.ci.refWidth / state.ci.refHeight;
+      const got = state.template.naturalWidth / state.template.naturalHeight;
+      if (Math.abs(got - want) / want > 0.01) setMsg($("saveMsg"), "warn", "底圖比例與 CI 設計稿不同，姓名位置可能偏移，請通知負責人。");
+    } catch (e) {
+      setMsg($("saveMsg"), "bad", "正式底圖讀取失敗，暫時顯示示範底圖。請通知負責人。");
+    }
+  }
+
+  /* ---------- 存檔 ----------
+     兩條路：在 Claude 的 Artifact 裡走 downloads 能力（會跳確認框）；一般瀏覽器用 <a download>。 */
+  let downloadsCap = null;
+  if (window.claude && typeof window.claude.use === "function") {
+    window.claude.use("downloads").then((d) => { downloadsCap = d; }).catch(() => {});
+  }
+  async function saveFile(filename, blob) {
+    if (downloadsCap) {
+      try { await downloadsCap.save({ filename, data: blob }); return "saved"; }
+      catch (e) { return e && e.code === "declined" ? "declined" : "unavailable"; }
+    }
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+    return "saved";
+  }
+  const saveResultText = (r, name) =>
+    r === "saved" ? ["ok", `已下載 ${name}`] :
+    r === "declined" ? ["warn", "已取消下載。"] :
+    ["bad", "這個檢視模式無法下載，請改用一般瀏覽器開啟工具。"];
+
+  /* ---------- 預覽確認 ----------
+     為什麼另外畫一張：畫面上的預覽在開發模式會帶紫色輔助線，
+     確認視窗必須是「實際要輸出的那張」，所以用同一個 drawInvitation 重畫、不帶輔助線。 */
+  const outCanvas = document.createElement("canvas");
+  const outCtx = outCanvas.getContext("2d");
+  $("dlgImg").append(outCanvas);
+
+  function fileName() {
+    const hon = $("honorific").value;
+    return `邀請函_${cleanName($("nameInput").value).replace(/[\\/:*?"<>|]/g, "")}${hon ? "_" + hon : ""}.png`;
+  }
+  $("previewBtn").addEventListener("click", async () => {
+    await render();
+    if (!state.fit || !state.fit.ok) return;
+    const n = N(), name = cleanName($("nameInput").value);
+    const { w, h } = drawInvitation(outCtx, composeText(name), true);
+    $("dlgName").textContent = fileName();
+    $("dlgMeta").textContent = `${w} × ${h}px · 字級 ${state.fit.size}px${state.dev ? " · 開發中設定" : ""}`;
+    $("confirmDlg").showModal();
+  });
+  $("dlgBack").addEventListener("click", () => $("confirmDlg").close());
+  $("dlgSave").addEventListener("click", async () => {
+    const blob = await new Promise((r) => outCanvas.toBlob(r, "image/png"));
+    const name = fileName();
+    const r = await saveFile(name, blob);
+    $("confirmDlg").close();
+    const [lv, t] = saveResultText(r, name);
+    setMsg($("saveMsg"), lv, t);
+  });
+
+  /* ==========================================================================
+     開發者模式
+     --------------------------------------------------------------------------
+     入口是左上角的小圖示，按下後輸入密碼解鎖（Leon 指定的方式）。
+     沒有後端，所以這是「防誤觸」而不是真正的權限控管：懂程式的人讀原始碼就能繞過。
+     但繞過的人也只能改到自己瀏覽器裡的輸出；所有顧問看到的正式設定
+     只來自網站上的 config/ci.json，要改它必須有網站的檔案權限。
+     ========================================================================== */
+  const DEV_FIELDS = [
+    ["d_size", "fontSize", "num"], ["d_min", "minFontSize", "num"], ["d_x", "x", "num"], ["d_y", "y", "num"],
+    ["d_maxw", "maxWidth", "num"], ["d_ls", "letterSpacing", "num"], ["d_align", "align", "str"],
+    ["d_cjk", "cjkFont", "str"], ["d_latin", "latinFont", "str"], ["d_prefix", "prefix", "str"], ["d_suffix", "suffix", "str"]
+  ];
+  function fillFontSelect(sel, script) {
+    sel.replaceChildren(...state.ci.fontLibrary.filter((f) => f.script === script).map((f) => {
+      const o = document.createElement("option"); o.value = f.family; o.textContent = f.label; return o;
+    }));
+  }
+  function syncDevInputs() {
+    const n = N();
+    for (const [id, key] of DEV_FIELDS) $(id).value = n[key];
+    $("d_color").value = /^#[0-9a-f]{6}$/i.test(n.color) ? n.color : "#ffffff";
+    $("d_colorHex").value = n.color;
+    $("d_x").max = state.ci.refWidth; $("d_y").max = state.ci.refHeight;
+  }
+  function saveDevOverrides() {
+    lsSet(DEV_KEY, JSON.stringify({ name: N(), refWidth: state.ci.refWidth, refHeight: state.ci.refHeight }));
+  }
+  function onDevInput() {
+    const n = N();
+    for (const [id, key, type] of DEV_FIELDS) {
+      const v = $(id).value;
+      if (type === "num") { const num = parseFloat(v); if (Number.isFinite(num)) n[key] = num; }
+      else n[key] = v;
+    }
+    if (n.minFontSize > n.fontSize) setMsg($("devMsg"), "warn", "最小字級大於標準字級，名字不會縮字。");
+    else setMsg($("devMsg"), "", "");
+    saveDevOverrides(); scheduleRender();
+  }
+  for (const [id] of DEV_FIELDS) $(id).addEventListener("input", onDevInput);
+  $("d_color").addEventListener("input", () => {
+    N().color = $("d_color").value.toUpperCase(); $("d_colorHex").value = N().color; saveDevOverrides(); scheduleRender();
+  });
+  $("d_colorHex").addEventListener("input", () => {
+    const v = $("d_colorHex").value.trim();
+    if (/^#[0-9a-f]{6}$/i.test(v)) { N().color = v.toUpperCase(); $("d_color").value = v; saveDevOverrides(); scheduleRender(); }
+  });
+
+  // 在預覽圖上拖曳：直接把對齊點移到手指／滑鼠位置，比輸入數字直覺
+  let dragging = false;
+  function dragTo(ev) {
+    const r = canvas.getBoundingClientRect();
+    const toRef = state.ci.refWidth / canvas.width;   // 實際底圖像素 → 設計稿像素
+    N().x = Math.round((ev.clientX - r.left) * (canvas.width / r.width) * toRef);
+    N().y = Math.round((ev.clientY - r.top) * (canvas.height / r.height) * toRef);
+    syncDevInputs(); saveDevOverrides(); scheduleRender();
+  }
+  canvas.addEventListener("pointerdown", (e) => { if (!state.dev) return; dragging = true; canvas.setPointerCapture(e.pointerId); dragTo(e); });
+  canvas.addEventListener("pointermove", (e) => { if (dragging) dragTo(e); });
+  canvas.addEventListener("pointerup", () => { dragging = false; });
+  canvas.addEventListener("pointercancel", () => { dragging = false; });
+
+  $("d_template").addEventListener("change", async (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    if (!/^image\/(png|jpeg)$/.test(file.type)) { setMsg($("devMsg"), "bad", "只接受 JPG 或 PNG 檔。"); return; }
+    try {
+      const img = await loadImage(URL.createObjectURL(file));
+      // 新底圖的尺寸就是新的設計稿基準，之後量到的座標直接等於這張圖的像素。
+      // 舊數值依比例換到新尺寸，位置大致不跑掉，再微調即可。
+      const kx = img.naturalWidth / state.ci.refWidth, ky = img.naturalHeight / state.ci.refHeight;
+      const n = N();
+      for (const key of ["fontSize", "minFontSize", "x", "maxWidth", "letterSpacing"]) n[key] = Math.round(n[key] * kx * 10) / 10;
+      n.y = Math.round(n.y * ky);
+      state.ci.refWidth = img.naturalWidth; state.ci.refHeight = img.naturalHeight;
+      state.template = img; state.templateLabel = `開發中底圖 ${file.name}`;
+      state.devTemplate = { img, file };
+      $("devExportImgBtn").hidden = false;
+      syncDevInputs(); saveDevOverrides();
+      setMsg($("devMsg"), "ok", `已換上 ${file.name}（${img.naturalWidth}×${img.naturalHeight}）。底圖只在這次開啟期間有效，匯出時請一併下載。`);
+      scheduleRender();
+    } catch (err) { setMsg($("devMsg"), "bad", "底圖讀取失敗。"); }
+  });
+
+  // 把目前開發中的設定整理成要寫出的 ci.json。templatePath 由呼叫端決定（匯出與發佈的檔名規則不同）。
+  async function buildConfigOut(templatePath) {
+    const out = mergeConfig(state.official, { name: N(), refWidth: state.ci.refWidth, refHeight: state.ci.refHeight });
+    delete out.configSrc;
+    if (templatePath) out.templateSrc = templatePath;
+    const np = $("d_newpass").value;
+    if (np) out.devPasscodeHash = await sha256(np);
+    return out;
+  }
+
+  /* ---------- 發佈到 GitHub ----------
+     網站是 GitHub Pages（純靜態），網頁自己沒辦法存檔，所以直接呼叫 GitHub API
+     把 config/ci.json（和新底圖）寫進 repo；Pages 重新部署後所有顧問就會拿到新設定。
+     權杖只存在開發者自己的瀏覽器 localStorage，不會寫進程式碼或 repo。 */
+  const TOKEN_KEY = "invitationTool.githubToken";
+  function toBase64(bytes) {
+    let bin = "";
+    for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    return btoa(bin);
+  }
+  async function ghPut(token, path, bytes, message) {
+    const gh = state.official.github;
+    const url = `https://api.github.com/repos/${gh.owner}/${gh.repo}/contents/${path}`;
+    const headers = { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json" };
+    // 覆蓋既有檔案時 GitHub 要求附上舊版的 sha，否則會拒絕（避免盲目覆蓋別人的修改）
+    let sha;
+    const head = await fetch(`${url}?ref=${encodeURIComponent(gh.branch)}`, { headers, cache: "no-store" });
+    if (head.ok) sha = (await head.json()).sha;
+    else if (head.status !== 404) throw head.status;
+    const res = await fetch(url, {
+      method: "PUT", headers,
+      body: JSON.stringify({ message, content: toBase64(bytes), branch: gh.branch, ...(sha ? { sha } : {}) })
+    });
+    if (!res.ok) throw res.status;
+  }
+  function ghErrorText(code) {
+    if (code === 401) return "GitHub 權杖無效或已過期，請重新產生後貼上。";
+    if (code === 403 || code === 404) return "這個權杖沒有寫入 repo 的權限，請確認權杖有勾選此 repo 的 Contents 讀寫。";
+    if (code === 409 || code === 422) return "GitHub 上的檔案剛好被別人改過，請重新整理頁面後再發佈一次。";
+    return "連不到 GitHub，請檢查網路後再試一次。";
+  }
+  $("devPublishBtn").addEventListener("click", async () => {
+    const gh = state.official.github;
+    if (!gh || !gh.owner || !gh.repo) { setMsg($("devMsg"), "bad", "設定裡沒有 GitHub repo 資訊，無法發佈。"); return; }
+    const typed = $("d_token").value.trim();
+    if (typed) lsSet(TOKEN_KEY, typed);
+    const token = typed || lsGet(TOKEN_KEY);
+    if (!token) { setMsg($("devMsg"), "bad", "請先貼上 GitHub 權杖。"); $("d_token").focus(); return; }
+
+    const btn = $("devPublishBtn");
+    btn.disabled = true;
+    try {
+      let templatePath = "";
+      if (state.devTemplate) {
+        // 檔名加上時間戳：舊網址被瀏覽器或 CDN 快取時，顧問也一定會拿到新底圖
+        const f = state.devTemplate.file;
+        const safe = f.name.replace(/[^\w.\-]+/g, "_");
+        templatePath = `template/${Date.now()}-${safe}`;
+        setMsg($("devMsg"), "", "上傳底圖中…");
+        await ghPut(token, templatePath, new Uint8Array(await f.arrayBuffer()), `更新邀請函底圖：${f.name}`);
+      }
+      setMsg($("devMsg"), "", "寫入設定中…");
+      const out = await buildConfigOut(templatePath);
+      await ghPut(token, "config/ci.json", new TextEncoder().encode(JSON.stringify(out, null, 2) + "\n"), "更新邀請函 CI 設定");
+      // 發佈成功：這份設定就是新的正式設定，本機的開發暫存可以清掉
+      state.official = mergeConfig(CI_DEFAULT, out);
+      state.devTemplate = null; $("devExportImgBtn").hidden = true; $("d_template").value = ""; $("d_newpass").value = "";
+      lsSet(DEV_KEY, null);
+      if (templatePath) state.templateLabel = "正式底圖（剛發佈）";
+      setMsg($("devMsg"), "ok", "已發佈。GitHub 約 1～2 分鐘後更新網站，顧問重新整理頁面就會套用。");
+    } catch (code) {
+      setMsg($("devMsg"), "bad", ghErrorText(code));
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  $("devExportBtn").addEventListener("click", async () => {
+    const out = await buildConfigOut(state.devTemplate ? `template/${state.devTemplate.file.name}` : "");
+    const blob = new Blob([JSON.stringify(out, null, 2) + "\n"], { type: "application/json" });
+    const r = await saveFile("ci.json", blob);
+    const [lv, t] = saveResultText(r, "ci.json");
+    setMsg($("devMsg"), lv, r === "saved"
+      ? `已匯出 ci.json。放到網站的 config/ 資料夾${state.devTemplate ? `，並把底圖放到 template/${state.devTemplate.file.name}` : ""}，顧問重新整理後就會套用。`
+      : t);
+  });
+  $("devExportImgBtn").addEventListener("click", async () => {
+    if (!state.devTemplate) return;
+    const f = state.devTemplate.file;
+    const [lv, t] = saveResultText(await saveFile(f.name, f), f.name);
+    setMsg($("devMsg"), lv, t);
+  });
+  $("devResetBtn").addEventListener("click", async () => {
+    lsSet(DEV_KEY, null);
+    state.ci = clone(state.official); state.devTemplate = null;
+    $("devExportImgBtn").hidden = true; $("d_template").value = "";
+    await applyOfficialTemplate();
+    syncDevInputs(); setMsg($("devMsg"), "ok", "已還原為正式設定。"); scheduleRender();
+  });
+
+  function enterDev() {
+    state.dev = true;
+    let saved = null;
+    try { saved = JSON.parse(lsGet(DEV_KEY) || "null"); } catch (e) {}
+    if (saved) state.ci = mergeConfig(state.official, saved);
+    fillFontSelect($("d_cjk"), "cjk"); fillFontSelect($("d_latin"), "latin");
+    syncDevInputs();
+    $("d_token").placeholder = lsGet("invitationTool.githubToken") ? "已儲存（要換權杖再貼新的）" : "github_pat_…";
+    $("unlockBox").hidden = true; $("devPanel").hidden = false;
+    canvas.classList.add("draggable");
+    if (saved) setMsg($("devMsg"), "warn", "已載入你上次未部署的改動。按「還原正式設定」可捨棄。");
+    scheduleRender();
+  }
+  async function exitDev() {
+    state.dev = false; ssSet(DEV_UNLOCK_KEY, null);
+    state.ci = clone(state.official); state.devTemplate = null;
+    await applyOfficialTemplate();
+    $("devPanel").hidden = true; canvas.classList.remove("draggable");
+    scheduleRender();
+  }
+  $("devLockBtn").addEventListener("click", exitDev);
+
+  $("unlockBox").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    let hash = "";
+    try { hash = await sha256($("passInput").value); }
+    catch (err) { setMsg($("unlockMsg"), "bad", "這個瀏覽器環境無法驗證密碼，請用 https 或 localhost 開啟。"); return; }
+    if (hash === state.official.devPasscodeHash) {
+      ssSet(DEV_UNLOCK_KEY, hash); $("passInput").value = ""; setMsg($("unlockMsg"), "", "");
+      enterDev();
+    } else setMsg($("unlockMsg"), "bad", "密碼不正確。");
+  });
+  // 左上小圖示：已在這個分頁解鎖過就直接開面板，否則浮出密碼小卡；再按一次收起
+  $("devEntry").addEventListener("click", () => {
+    if (state.dev) { $("devPanel").scrollIntoView({ behavior: "smooth", block: "start" }); return; }
+    if (ssGet(DEV_UNLOCK_KEY) === state.official.devPasscodeHash) { enterDev(); return; }
+    const box = $("unlockBox");
+    box.hidden = !box.hidden;
+    if (!box.hidden) $("passInput").focus();
+  });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") $("unlockBox").hidden = true; });
+
+  /* ---------- 啟動 ---------- */
+  $("nameInput").addEventListener("input", scheduleRender);
+  $("honorific").addEventListener("change", scheduleRender);
+  fillHonorifics();
+  (async () => {
+    render();                                      // 先畫一次，畫面不空白
+    try {
+      // 加時間參數繞過 GitHub Pages 的 10 分鐘快取，開發者一發佈，顧問重新整理就拿得到
+      const res = await fetch(`${CI_DEFAULT.configSrc}?t=${Date.now()}`, { cache: "no-store" });
+      if (res.ok) { state.official = mergeConfig(CI_DEFAULT, await res.json()); state.officialSource = "config/ci.json"; }
+    } catch (e) { /* 沒有 ci.json（例如示範頁）就用內建預設 */ }
+    state.ci = clone(state.official);
+    fillHonorifics();
+    await Promise.all([applyOfficialTemplate(), loadCoverage()]);
+    scheduleRender();
+  })();
+})();
+</script>

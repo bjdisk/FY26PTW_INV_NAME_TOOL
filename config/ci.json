@@ -1,0 +1,54 @@
+{
+  "refWidth": 1080,
+  "refHeight": 1350,
+  "templateSrc": "",
+  "github": {
+    "owner": "bjdisk",
+    "repo": "FY26PTW_INV_NAME_TOOL",
+    "branch": "main"
+  },
+  "fontLibrary": [
+    {
+      "family": "Porsche Next",
+      "label": "Porsche Next Regular",
+      "src": "fonts/PorscheNext-Regular.otf",
+      "script": "latin"
+    },
+    {
+      "family": "DFHei Medium P",
+      "label": "華康中黑體(P)",
+      "src": "fonts/DFHeiMediumP.woff2",
+      "script": "cjk"
+    },
+    {
+      "family": "DFHei Bold P",
+      "label": "華康粗黑體(P)",
+      "src": "fonts/DFHeiBoldP.woff2",
+      "script": "cjk"
+    }
+  ],
+  "fallbackFamily": "Noto Sans TC",
+  "coverageSrc": "fonts/coverage.txt",
+  "devPasscodeHash": "0a0667865bc17f9d624bcf11088057bbab46336e7dae65f3d5366f4f7a18333e",
+  "name": {
+    "latinFont": "Porsche Next",
+    "cjkFont": "DFHei Medium P",
+    "fontSize": 72,
+    "minFontSize": 48,
+    "color": "#FFFFFF",
+    "x": 540,
+    "y": 742,
+    "align": "center",
+    "maxWidth": 820,
+    "letterSpacing": 2,
+    "prefix": "",
+    "suffix": "",
+    "maxUnits": 20,
+    "honorifics": [
+      "",
+      "先生",
+      "女士"
+    ],
+    "honorificSeparator": " "
+  }
+}
