@@ -11,13 +11,13 @@
    也不會有人改程式時順手把規範改壞。
 
    座標與字級都以「輸出尺寸」(refWidth × refHeight) 的像素為準，也就是下載的那張圖。
-   輸出固定為 iPhone 18 Pro 螢幕比例（1206×2622）縮到 FHD 寬度：1080×2348（Leon 指定）。
-   上傳的底圖不論尺寸，都會自動置中裁切成這個比例。
+   輸出寬度固定 1080（FHD），高度跟著底圖比例走，不裁切（Leon 2026-10-12 指定）：
+   EDM 版面通常排到左右邊緣，裁掉兩側就會切到字。refHeight 由上傳的底圖決定。
    ========================================================================== */
 const CI_DEFAULT = {
   configSrc: "config/ci.json",
   refWidth: 1080,
-  refHeight: 2348,
+  refHeight: 1920,   // 只在沒有底圖（示範圖）時使用；有底圖就以底圖比例為準
   output: { format: "jpg", quality: 0.92 },   // 下載格式：JPG，品質 0.92（肉眼看不出壓縮、檔案約 300～600KB）
   templateSrc: "",          // 留空 = 內建示範底圖
 
@@ -272,7 +272,7 @@ button.small { padding: 4px 10px; font-size: 12px; }
           <div class="colorrow"><input id="d_color" type="color" aria-label="顏色選擇器"><input id="d_colorHex" type="text" maxlength="7" spellcheck="false"></div></div>
         <div class="ctl"><label for="d_prefix">前綴文字</label><input id="d_prefix" type="text"></div>
         <div class="ctl"><label for="d_suffix">後綴文字</label><input id="d_suffix" type="text"></div>
-        <div class="ctl wide"><label for="d_template">更換底圖（JPG／PNG）建議 1080 × 2348 px 直式（iPhone 18 Pro 全螢幕比例）。其他尺寸會自動置中裁切成這個比例。</label><input id="d_template" type="file" accept="image/png,image/jpeg"></div>
+        <div class="ctl wide"><label for="d_template">更換底圖（JPG／PNG）建議寬度至少 1080 px 的直式圖（例如 1080 × 1920）。不會裁切，會整張等比縮放到寬 1080 px，高度依原圖比例。</label><input id="d_template" type="file" accept="image/png,image/jpeg"></div>
         <div class="ctl wide"><label for="d_newpass">新密碼（選填，發佈時寫入）</label><input id="d_newpass" type="password" autocomplete="new-password"></div>
         <div class="ctl wide"><label for="d_token">GitHub 權杖（只存在這台電腦的瀏覽器，貼一次即可）</label><input id="d_token" type="password" autocomplete="off" spellcheck="false" placeholder="github_pat_…"></div>
       </div>
@@ -357,16 +357,15 @@ button.small { padding: 4px 10px; font-size: 12px; }
     if (over.name && typeof over.name === "object") Object.assign(out.name, over.name);
     return out;
   }
-  // 舊版設定的座標是以當時底圖的原尺寸為準。改成固定輸出尺寸後，
-  // 用同樣的 cover 裁切公式把座標換過來，位置才會跟畫面上看到的一致。
+  // 舊版設定的座標是以當時底圖的原寬度為準。現在寬度固定 1080、不裁切，
+  // 所以只要依寬度等比換算，位置就會跟畫面上看到的一致。
   function normalizeConfig(cfg) {
-    const W = CI_DEFAULT.refWidth, H = CI_DEFAULT.refHeight;
-    if (cfg.refWidth === W && cfg.refHeight === H) return cfg;
-    const r = coverRect(cfg.refWidth, cfg.refHeight, W, H);
-    const n = cfg.name, round = (v) => Math.round(v * 10) / 10;
-    n.x = round(n.x * r.s - r.ox); n.y = round(n.y * r.s - r.oy);
-    for (const k of ["fontSize", "minFontSize", "maxWidth", "letterSpacing"]) n[k] = round(n[k] * r.s);
-    cfg.refWidth = W; cfg.refHeight = H;
+    const W = CI_DEFAULT.refWidth;
+    if (cfg.refWidth === W) return cfg;
+    const k = W / cfg.refWidth, n = cfg.name, round = (v) => Math.round(v * 10) / 10;
+    n.x = round(n.x * k); n.y = round(n.y * k);
+    for (const key of ["fontSize", "minFontSize", "maxWidth", "letterSpacing"]) n[key] = round(n[key] * k);
+    cfg.refWidth = W; cfg.refHeight = Math.round(cfg.refHeight * k);
     return cfg;
   }
   async function sha256(text) {
@@ -512,15 +511,13 @@ button.small { padding: 4px 10px; font-size: 12px; }
     return { ok: false, size: n.minFontSize };
   }
 
-  // 「cover」裁切：把任意尺寸的圖等比放大到蓋滿 W×H，超出的部分從兩側（或上下）平均裁掉。
-  // 回傳來源圖要取的區塊，以及換算比例 s 與偏移 ox/oy（給舊座標換算用）。
-  function coverRect(iw, ih, W, H) {
-    const s = Math.max(W / iw, H / ih);
-    const sw = W / s, sh = H / s;
-    return { sx: (iw - sw) / 2, sy: (ih - sh) / 2, sw, sh, s, ox: (iw * s - W) / 2, oy: (ih * s - H) / 2 };
+  // 輸出高度：寬度固定 refWidth，高度依底圖等比換算，整張圖完整保留不裁切。
+  // 用實際載入的底圖算而不是只信 ci.json，避免設定檔與底圖對不上時畫面被拉長或壓扁。
+  function outHeight(img = state.template) {
+    return img ? Math.round(state.ci.refWidth * img.naturalHeight / img.naturalWidth) : state.ci.refHeight;
   }
 
-  // 每次打字都重新裁切縮放一張 1080×2348 的底圖很浪費（中階手機約 100ms），
+  // 每次打字都重新縮放一張全尺寸底圖很浪費（中階手機約 100ms），
   // 所以底圖畫好一次就存起來，之後只要整張貼上去再寫字
   let bgCache = { img: undefined, w: 0, h: 0, canvas: null };
   function backgroundFor(img, w, h) {
@@ -532,8 +529,7 @@ button.small { padding: 4px 10px; font-size: 12px; }
     c.fillStyle = "#FFFFFF"; c.fillRect(0, 0, w, h);   // JPG 沒有透明，先鋪白底避免邊緣變黑
     if (img) {
       c.imageSmoothingQuality = "high";
-      const r = coverRect(img.naturalWidth, img.naturalHeight, w, h);
-      c.drawImage(img, r.sx, r.sy, r.sw, r.sh, 0, 0, w, h);
+      c.drawImage(img, 0, 0, w, h);
     } else drawDemoBackground(c, w, h);
     c.restore();
     bgCache = { img, w, h, canvas: cv };
@@ -541,10 +537,9 @@ button.small { padding: 4px 10px; font-size: 12px; }
   }
 
   function drawInvitation(c, text, valid, { guides = false } = {}) {
-    // 輸出尺寸永遠是設定的 refWidth × refHeight（1080×2348），不跟著底圖走，
-    // 這樣不管開發者上傳什麼尺寸，顧問下載的檔案規格都一致
+    // 寬度永遠是 refWidth（1080），高度跟底圖比例，顧問下載的檔案寬度規格一致、版面完整
     const img = state.template;
-    const w = state.ci.refWidth, h = state.ci.refHeight;
+    const w = state.ci.refWidth, h = outHeight(img);
     if (c.canvas.width !== w) c.canvas.width = w;
     if (c.canvas.height !== h) c.canvas.height = h;
     const scale = 1, n = N();
@@ -618,7 +613,7 @@ button.small { padding: 4px 10px; font-size: 12px; }
       ["顏色", n.color],
       ["位置", `x ${n.x}, y ${n.y}（${{ left: "靠左", center: "置中", right: "靠右" }[n.align] || n.align}）`],
       ["寬度上限", `${n.maxWidth}px`],
-      ["輸出", `${state.ci.refWidth} × ${state.ci.refHeight}px JPG`]
+      ["輸出", `${state.ci.refWidth} × ${outHeight()}px JPG`]
     ];
     const dl = $("specList"); dl.replaceChildren();
     for (const [k, v] of rows) {
@@ -742,7 +737,7 @@ button.small { padding: 4px 10px; font-size: 12px; }
     for (const [id, key] of DEV_FIELDS) $(id).value = n[key];
     $("d_color").value = /^#[0-9a-f]{6}$/i.test(n.color) ? n.color : "#ffffff";
     $("d_colorHex").value = n.color;
-    $("d_x").max = state.ci.refWidth; $("d_y").max = state.ci.refHeight;
+    $("d_x").max = state.ci.refWidth; $("d_y").max = outHeight();
   }
   function saveDevOverrides() {
     lsSet(DEV_KEY, JSON.stringify({ name: N(), refWidth: state.ci.refWidth, refHeight: state.ci.refHeight }));
@@ -789,38 +784,36 @@ button.small { padding: 4px 10px; font-size: 12px; }
     try {
       srcUrl = URL.createObjectURL(file);
       const src = await loadImage(srcUrl);
-      // 在瀏覽器裡就先裁切、縮放成 1080×2348 的 JPG：
-      // 上傳到 GitHub 的檔案小、顧問端載入快，而且畫面上看到的裁切就是最終結果
-      const W = state.ci.refWidth, H = state.ci.refHeight;
+      // 在瀏覽器裡就先等比縮放成寬 1080 的 JPG（不裁切）：
+      // 上傳到 GitHub 的檔案小、顧問端載入快，而且畫面上看到的就是最終結果
+      const W = state.ci.refWidth, H = outHeight(src);
       const cv = document.createElement("canvas"); cv.width = W; cv.height = H;
       const cx = cv.getContext("2d");
-      cx.fillStyle = "#FFFFFF"; cx.fillRect(0, 0, W, H);
+      cx.fillStyle = "#FFFFFF"; cx.fillRect(0, 0, W, H);   // PNG 透明處轉 JPG 會變黑，先鋪白
       cx.imageSmoothingQuality = "high";
-      const r = coverRect(src.naturalWidth, src.naturalHeight, W, H);
-      cx.drawImage(src, r.sx, r.sy, r.sw, r.sh, 0, 0, W, H);
+      cx.drawImage(src, 0, 0, W, H);
       const blob = await new Promise((res) => cv.toBlob(res, "image/jpeg", 0.92));
       const name = file.name.replace(/\.[^.]+$/, "") + ".jpg";
       const cropped = new File([blob], name, { type: "image/jpeg" });
       if (state.devTemplate) URL.revokeObjectURL(state.devTemplate.img.src);
       const img = await loadImage(URL.createObjectURL(cropped));
-      state.template = img; state.templateLabel = `開發中底圖 ${file.name}`;
+      state.template = img; state.ci.refHeight = H; state.templateLabel = `開發中底圖 ${file.name}`;
       state.devTemplate = { img, file: cropped };
       $("devExportImgBtn").hidden = false;
-      const trimmed = Math.abs(src.naturalWidth / src.naturalHeight - W / H) > 0.005;
-      const small = src.naturalWidth < W || src.naturalHeight < H;
-      const notes = [`已換上 ${file.name}（原圖 ${src.naturalWidth}×${src.naturalHeight}）。`];
-      if (trimmed) notes.push("比例不同，已自動置中裁切。");
-      if (small) notes.push(`解析度低於 ${W}×${H}，輸出會略模糊，建議換高解析度原檔。`);
+      const small = src.naturalWidth < W;
+      const notes = [`已換上 ${file.name}（原圖 ${src.naturalWidth}×${src.naturalHeight}，輸出 ${W}×${H}）。`];
+      if (small) notes.push(`原圖寬度不到 ${W}px，輸出會略模糊，建議換高解析度原檔。`);
+      notes.push("底圖高度變了，請確認姓名位置。");
       notes.push("確認後按「發佈給所有顧問」。");
       setMsg($("devMsg"), small ? "warn" : "ok", notes.join(""));
-      scheduleRender();
+      syncDevInputs(); saveDevOverrides(); scheduleRender();
     } catch (err) { setMsg($("devMsg"), "bad", "底圖讀取失敗，請確認是 JPG 或 PNG 檔。"); }
     finally { if (srcUrl) URL.revokeObjectURL(srcUrl); }
   });
 
   // 把目前開發中的設定整理成要寫出的 ci.json。templatePath 由呼叫端決定（匯出與發佈的檔名規則不同）。
   async function buildConfigOut(templatePath) {
-    const out = mergeConfig(state.official, { name: N(), refWidth: state.ci.refWidth, refHeight: state.ci.refHeight });
+    const out = mergeConfig(state.official, { name: N(), refWidth: state.ci.refWidth, refHeight: outHeight() });
     delete out.configSrc; delete out.fontLibrary; delete out.fallbackStack;
     if (templatePath) out.templateSrc = templatePath;
     const np = $("d_newpass").value;
