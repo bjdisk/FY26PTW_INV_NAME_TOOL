@@ -1,11 +1,11 @@
 {
   "refWidth": 1080,
-  "refHeight": 2348,
+  "refHeight": 1920,
   "output": {
     "format": "jpg",
     "quality": 0.92
   },
-  "templateSrc": "template/1791772211275-PORSCHE_Carrera_GT_Grant_Larson_EDM-03.jpg",
+  "templateSrc": "template/1791776063208-PORSCHE_Carrera_GT_Grant_Larson_EDM-03.jpg",
   "github": {
     "owner": "bjdisk",
     "repo": "FY26PTW_INV_NAME_TOOL",
@@ -18,8 +18,8 @@
     "fontSize": 58.6,
     "minFontSize": 58.6,
     "color": "#0A0A0A",
-    "x": 549,
-    "y": 1572,
+    "x": 516,
+    "y": 1277,
     "align": "center",
     "maxWidth": 1000.6,
     "letterSpacing": 2.4,
