@@ -53,7 +53,13 @@ const CI_DEFAULT = {
     suffix: "",                  // 例：" 先生／女士"
     maxUnits: 20,                // 字數上限：中文（全形）算 2、英文／數字／空白（半形）算 1；20 = 10 個中文字
     honorifics: ["", "先生", "女士"],   // 稱謂選單；"" = 不加稱謂（英文名也用中文稱謂）
-    honorificSeparator: " "      // 姓名與稱謂之間空一格：「陳美玲 女士」
+    honorificSeparator: " ",     // 姓名與稱謂之間空一格：「陳美玲 女士」
+    // 姓名底線：只畫在姓名下方，稱謂不畫（Leon 2026-10-12）。預設值量自 EDM 原稿的紅線
+    underline: true,
+    underlineColor: "#A62F29",
+    underlineWidth: 2,           // 線粗 px
+    underlineOffset: 12,         // 線的中心在文字基線下方幾 px
+    underlineExtend: 0           // 線左右各多延伸幾 px（0 = 與姓名等寬）
   }
 };
 </script>
@@ -162,6 +168,7 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 }
 .ctl input[type="number"] { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
 .ctl input[type="color"] { padding: 2px; height: 36px; }
+.ctl input[type="checkbox"] { width: auto; height: auto; margin: 0 4px 0 0; vertical-align: -2px; }
 .ctl.wide { grid-column: 1 / -1; }
 .colorrow { display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 8px; }
 .dev .actions button { flex: 1 1 140px; font-size: 14px; }
@@ -270,6 +277,10 @@ button.small { padding: 4px 10px; font-size: 12px; }
           <select id="d_align"><option value="left">靠左</option><option value="center">置中</option><option value="right">靠右</option></select></div>
         <div class="ctl"><label for="d_colorHex">顏色</label>
           <div class="colorrow"><input id="d_color" type="color" aria-label="顏色選擇器"><input id="d_colorHex" type="text" maxlength="7" spellcheck="false"></div></div>
+        <div class="ctl"><label for="d_ul"><input id="d_ul" type="checkbox"> 姓名底線（稱謂不畫）</label><input id="d_ulColor" type="color" aria-label="底線顏色"></div>
+        <div class="ctl"><label for="d_ulW">底線粗細 px</label><input id="d_ulW" type="number" min="0.5" step="0.5"></div>
+        <div class="ctl"><label for="d_ulOff">底線距基線 px</label><input id="d_ulOff" type="number" step="1"></div>
+        <div class="ctl"><label for="d_ulExt">底線左右延伸 px</label><input id="d_ulExt" type="number" step="1"></div>
         <div class="ctl"><label for="d_prefix">前綴文字</label><input id="d_prefix" type="text"></div>
         <div class="ctl"><label for="d_suffix">後綴文字</label><input id="d_suffix" type="text"></div>
         <div class="ctl wide"><label for="d_template">更換底圖（JPG／PNG）建議寬度至少 1080 px 的直式圖（例如 1080 × 1920）。不會裁切，會整張等比縮放到寬 1080 px，高度依原圖比例。</label><input id="d_template" type="file" accept="image/png,image/jpeg"></div>
@@ -364,7 +375,9 @@ button.small { padding: 4px 10px; font-size: 12px; }
     if (cfg.refWidth === W) return cfg;
     const k = W / cfg.refWidth, n = cfg.name, round = (v) => Math.round(v * 10) / 10;
     n.x = round(n.x * k); n.y = round(n.y * k);
-    for (const key of ["fontSize", "minFontSize", "maxWidth", "letterSpacing"]) n[key] = round(n[key] * k);
+    for (const key of ["fontSize", "minFontSize", "maxWidth", "letterSpacing", "underlineWidth", "underlineOffset", "underlineExtend"]) {
+      if (typeof n[key] === "number") n[key] = round(n[key] * k);
+    }
     cfg.refWidth = W; cfg.refHeight = Math.round(cfg.refHeight * k);
     return cfg;
   }
@@ -384,6 +397,20 @@ button.small { padding: 4px 10px; font-size: 12px; }
   function composeText(name) {
     const n = N(), hon = $("honorific").value;
     return `${n.prefix}${name}${hon ? n.honorificSeparator + hon : ""}${n.suffix}`;
+  }
+  // 底線只畫在姓名那一段：量出「前綴」和「前綴＋姓名」的寬度，就知道姓名在整串文字裡從哪裡開始、到哪裡結束。
+  // measureText 在有字距時會把最後一個字後面的字距也算進去，要扣掉，線才不會比字長一截。
+  function drawNameUnderline(c, text, name, scale) {
+    const n = N();
+    if (!n.underline || !name) return;
+    const ls = "letterSpacing" in c ? n.letterSpacing * scale : 0;
+    const total = c.measureText(text).width - ls;
+    const left = n.x * scale - total * ({ center: 0.5, right: 1 }[n.align] || 0);
+    const start = n.prefix ? c.measureText(n.prefix).width : 0;
+    const end = c.measureText(n.prefix + name).width - ls;
+    const ext = (n.underlineExtend || 0) * scale, lw = Math.max(0.5, n.underlineWidth * scale);
+    c.fillStyle = n.underlineColor;
+    c.fillRect(left + start - ext, n.y * scale + n.underlineOffset * scale - lw / 2, end - start + ext * 2, lw);
   }
   function fillHonorifics() {
     const sel = $("honorific"), cur = sel.value;
@@ -536,7 +563,7 @@ button.small { padding: 4px 10px; font-size: 12px; }
     return cv;
   }
 
-  function drawInvitation(c, text, valid, { guides = false } = {}) {
+  function drawInvitation(c, text, valid, { guides = false, name = "" } = {}) {
     // 寬度永遠是 refWidth（1080），高度跟底圖比例，顧問下載的檔案寬度規格一致、版面完整
     const img = state.template;
     const w = state.ci.refWidth, h = outHeight(img);
@@ -553,6 +580,7 @@ button.small { padding: 4px 10px; font-size: 12px; }
       if (fit.ok) {
         c.fillStyle = n.color; c.textAlign = n.align; c.textBaseline = "alphabetic";
         c.fillText(text, n.x * scale, n.y * scale);
+        drawNameUnderline(c, text, name, scale);
       }
       c.restore();
     }
@@ -582,7 +610,7 @@ button.small { padding: 4px 10px; font-size: 12px; }
     if (token !== drawToken) return;   // 使用者打字很快時，只畫最後一次
 
     const err = validate(name);
-    const { fit, w, h } = drawInvitation(ctx, text, !err, { guides: state.dev });
+    const { fit, w, h } = drawInvitation(ctx, text, !err, { guides: state.dev, name });
     state.fit = err ? null : fit;
 
     const msg = $("nameMsg");
@@ -683,7 +711,7 @@ button.small { padding: 4px 10px; font-size: 12px; }
     await render();
     if (!state.fit || !state.fit.ok) return;
     const n = N(), name = cleanName($("nameInput").value);
-    const { w, h } = drawInvitation(outCtx, composeText(name), true);
+    const { w, h } = drawInvitation(outCtx, composeText(name), true, { name });
     $("dlgName").textContent = fileName();
     $("dlgMeta").textContent = `${w} × ${h}px JPG · 字級 ${state.fit.size}px${state.dev ? " · 開發中設定" : ""}`;
     // 打開視窗時就先把 JPG 做好：iPhone 的分享選單必須在「按下按鈕的當下」叫出，
@@ -725,7 +753,9 @@ button.small { padding: 4px 10px; font-size: 12px; }
   const DEV_FIELDS = [
     ["d_size", "fontSize", "num"], ["d_min", "minFontSize", "num"], ["d_x", "x", "num"], ["d_y", "y", "num"],
     ["d_maxw", "maxWidth", "num"], ["d_ls", "letterSpacing", "num"], ["d_align", "align", "str"],
-    ["d_cjk", "cjkFont", "str"], ["d_latin", "latinFont", "str"], ["d_prefix", "prefix", "str"], ["d_suffix", "suffix", "str"]
+    ["d_cjk", "cjkFont", "str"], ["d_latin", "latinFont", "str"], ["d_prefix", "prefix", "str"], ["d_suffix", "suffix", "str"],
+    ["d_ul", "underline", "bool"], ["d_ulColor", "underlineColor", "color"], ["d_ulW", "underlineWidth", "num"],
+    ["d_ulOff", "underlineOffset", "num"], ["d_ulExt", "underlineExtend", "num"]
   ];
   function fillFontSelect(sel, script) {
     sel.replaceChildren(...state.ci.fontLibrary.filter((f) => f.script === script).map((f) => {
@@ -734,7 +764,10 @@ button.small { padding: 4px 10px; font-size: 12px; }
   }
   function syncDevInputs() {
     const n = N();
-    for (const [id, key] of DEV_FIELDS) $(id).value = n[key];
+    for (const [id, key, type] of DEV_FIELDS) {
+      if (type === "bool") $(id).checked = !!n[key];
+      else $(id).value = n[key];
+    }
     $("d_color").value = /^#[0-9a-f]{6}$/i.test(n.color) ? n.color : "#ffffff";
     $("d_colorHex").value = n.color;
     $("d_x").max = state.ci.refWidth; $("d_y").max = outHeight();
@@ -746,14 +779,17 @@ button.small { padding: 4px 10px; font-size: 12px; }
     const n = N();
     for (const [id, key, type] of DEV_FIELDS) {
       const v = $(id).value;
-      if (type === "num") { const num = parseFloat(v); if (Number.isFinite(num)) n[key] = num; }
+      if (type === "bool") n[key] = $(id).checked;
+      else if (type === "color") n[key] = v.toUpperCase();
+      else if (type === "num") { const num = parseFloat(v); if (Number.isFinite(num)) n[key] = num; }
       else n[key] = v;
     }
     if (n.minFontSize > n.fontSize) setMsg($("devMsg"), "warn", "最小字級大於標準字級，名字不會縮字。");
     else setMsg($("devMsg"), "", "");
     saveDevOverrides(); scheduleRender();
   }
-  for (const [id] of DEV_FIELDS) $(id).addEventListener("input", onDevInput);
+  // checkbox 在部分瀏覽器只觸發 change 不觸發 input，兩個都聽
+  for (const [id] of DEV_FIELDS) { $(id).addEventListener("input", onDevInput); $(id).addEventListener("change", onDevInput); }
   $("d_color").addEventListener("input", () => {
     N().color = $("d_color").value.toUpperCase(); $("d_colorHex").value = N().color; saveDevOverrides(); scheduleRender();
   });
