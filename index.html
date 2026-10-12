@@ -61,12 +61,13 @@ const CI_DEFAULT = {
     maxUnits: 20,                // 字數上限：中文（全形）算 2、英文／數字／空白（半形）算 1；20 = 10 個中文字
     honorifics: ["", "先生", "女士"],   // 稱謂選單；"" = 不加稱謂（英文名也用中文稱謂）
     honorificSeparator: " ",     // 姓名與稱謂之間空一格：「陳美玲 女士」
-    // 姓名底線：只畫在姓名下方，稱謂不畫（Leon 2026-10-12）。預設值量自 EDM 原稿的紅線
+    // 底線：畫在整串文字（姓名＋稱謂）下方，顧問可在輸入區自行勾選要不要（Leon 2026-10-12）。
+    // underline 是勾選框的預設狀態；顏色、粗細、位置由開發者固定。預設值量自 EDM 原稿的紅線
     underline: true,
     underlineColor: "#A62F29",
     underlineWidth: 2,           // 線粗 px
     underlineOffset: 12,         // 線的中心在文字基線下方幾 px
-    underlineExtend: 0           // 線左右各多延伸幾 px（0 = 與姓名等寬）
+    underlineExtend: 0           // 線左右各多延伸幾 px（0 = 與文字等寬）
   }
 };
 </script>
@@ -125,6 +126,8 @@ header p { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
 
 .field { display: grid; gap: 8px; }
 .field > label { font-size: 13px; font-weight: 500; color: var(--muted); letter-spacing: .04em; }
+.check { display: inline-flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 15px; cursor: pointer; }
+.check input { width: 20px; height: 20px; margin: 0; accent-color: #A62F29; }
 .namerow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
 #honorific {
   font: inherit; font-size: 18px; padding: 0 10px; min-width: 88px;
@@ -254,6 +257,7 @@ button.small { padding: 4px 10px; font-size: 12px; }
         <input id="nameInput" type="text" autocomplete="off" spellcheck="false" value="王小明" aria-describedby="nameMsg">
         <select id="honorific" aria-label="稱謂"></select>
       </div>
+      <label class="check"><input id="ulToggle" type="checkbox"> 文字加紅色底線</label>
       <p id="nameMsg" class="msg" role="status"></p>
     </div>
 
@@ -284,7 +288,7 @@ button.small { padding: 4px 10px; font-size: 12px; }
           <select id="d_align"><option value="left">靠左</option><option value="center">置中</option><option value="right">靠右</option></select></div>
         <div class="ctl"><label for="d_colorHex">顏色</label>
           <div class="colorrow"><input id="d_color" type="color" aria-label="顏色選擇器"><input id="d_colorHex" type="text" maxlength="7" spellcheck="false"></div></div>
-        <div class="ctl"><label for="d_ul"><input id="d_ul" type="checkbox"> 姓名底線（稱謂不畫）</label><input id="d_ulColor" type="color" aria-label="底線顏色"></div>
+        <div class="ctl"><label for="d_ul"><input id="d_ul" type="checkbox"> 底線預設勾選（顧問可自行取消）</label><input id="d_ulColor" type="color" aria-label="底線顏色"></div>
         <div class="ctl"><label for="d_ulW">底線粗細 px</label><input id="d_ulW" type="number" min="0.5" step="0.5"></div>
         <div class="ctl"><label for="d_ulOff">底線距基線 px</label><input id="d_ulOff" type="number" step="1"></div>
         <div class="ctl"><label for="d_ulExt">底線左右延伸 px</label><input id="d_ulExt" type="number" step="1"></div>
@@ -405,19 +409,21 @@ button.small { padding: 4px 10px; font-size: 12px; }
     const n = N(), hon = $("honorific").value;
     return `${n.prefix}${name}${hon ? n.honorificSeparator + hon : ""}${n.suffix}`;
   }
-  // 底線只畫在姓名那一段：量出「前綴」和「前綴＋姓名」的寬度，就知道姓名在整串文字裡從哪裡開始、到哪裡結束。
-  // measureText 在有字距時會把最後一個字後面的字距也算進去，要扣掉，線才不會比字長一截。
-  function drawNameUnderline(c, text, name, scale) {
+  // 顧問有沒有自己動過底線勾選：沒動過就跟著開發者設定的預設值走，動過就尊重顧問的選擇
+  let userUnderline = null;
+  function underlineOn() { return userUnderline ?? !!N().underline; }
+  function syncUnderlineToggle() { $("ulToggle").checked = underlineOn(); }
+  // 底線畫在整串文字下方（含稱謂）。measureText 在有字距時會把最後一個字後面的字距也算進去，
+  // 要扣掉，線才不會比字長一截。
+  function drawTextUnderline(c, text, scale) {
     const n = N();
-    if (!n.underline || !name) return;
+    if (!underlineOn() || !text.trim()) return;
     const ls = "letterSpacing" in c ? n.letterSpacing * scale : 0;
-    const total = c.measureText(text).width - ls;
-    const left = n.x * scale - total * ({ center: 0.5, right: 1 }[n.align] || 0);
-    const start = n.prefix ? c.measureText(n.prefix).width : 0;
-    const end = c.measureText(n.prefix + name).width - ls;
+    const width = c.measureText(text).width - ls;
+    const left = n.x * scale - width * ({ center: 0.5, right: 1 }[n.align] || 0);
     const ext = (n.underlineExtend || 0) * scale, lw = Math.max(0.5, n.underlineWidth * scale);
     c.fillStyle = n.underlineColor;
-    c.fillRect(left + start - ext, n.y * scale + n.underlineOffset * scale - lw / 2, end - start + ext * 2, lw);
+    c.fillRect(left - ext, n.y * scale + n.underlineOffset * scale - lw / 2, width + ext * 2, lw);
   }
   function fillHonorifics() {
     const sel = $("honorific"), cur = sel.value;
@@ -570,7 +576,7 @@ button.small { padding: 4px 10px; font-size: 12px; }
     return cv;
   }
 
-  function drawInvitation(c, text, valid, { guides = false, name = "" } = {}) {
+  function drawInvitation(c, text, valid, { guides = false } = {}) {
     // 寬度永遠是 refWidth（1080），高度跟底圖比例，顧問下載的檔案寬度規格一致、版面完整
     const img = state.template;
     const w = state.ci.refWidth, h = outHeight(img);
@@ -587,7 +593,7 @@ button.small { padding: 4px 10px; font-size: 12px; }
       if (fit.ok) {
         c.fillStyle = n.color; c.textAlign = n.align; c.textBaseline = "alphabetic";
         c.fillText(text, n.x * scale, n.y * scale);
-        drawNameUnderline(c, text, name, scale);
+        drawTextUnderline(c, text, scale);
       }
       c.restore();
     }
@@ -617,7 +623,7 @@ button.small { padding: 4px 10px; font-size: 12px; }
     if (token !== drawToken) return;   // 使用者打字很快時，只畫最後一次
 
     const err = validate(name);
-    const { fit, w, h } = drawInvitation(ctx, text, !err, { guides: state.dev, name });
+    const { fit, w, h } = drawInvitation(ctx, text, !err, { guides: state.dev });
     state.fit = err ? null : fit;
 
     const msg = $("nameMsg");
@@ -718,7 +724,7 @@ button.small { padding: 4px 10px; font-size: 12px; }
     await render();
     if (!state.fit || !state.fit.ok) return;
     const n = N(), name = cleanName($("nameInput").value);
-    const { w, h } = drawInvitation(outCtx, composeText(name), true, { name });
+    const { w, h } = drawInvitation(outCtx, composeText(name), true);
     $("dlgName").textContent = fileName();
     $("dlgMeta").textContent = `${w} × ${h}px JPG · 字級 ${state.fit.size}px${state.dev ? " · 開發中設定" : ""}`;
     // 打開視窗時就先把 JPG 做好：iPhone 的分享選單必須在「按下按鈕的當下」叫出，
@@ -793,6 +799,7 @@ button.small { padding: 4px 10px; font-size: 12px; }
     }
     if (n.minFontSize > n.fontSize) setMsg($("devMsg"), "warn", "最小字級大於標準字級，名字不會縮字。");
     else setMsg($("devMsg"), "", "");
+    userUnderline = null; syncUnderlineToggle();   // 開發者改預設值時，預覽直接反映新預設
     saveDevOverrides(); scheduleRender();
   }
   // checkbox 在部分瀏覽器只觸發 change 不觸發 input，兩個都聽
@@ -1016,7 +1023,8 @@ button.small { padding: 4px 10px; font-size: 12px; }
   /* ---------- 啟動 ---------- */
   $("nameInput").addEventListener("input", scheduleRender);
   $("honorific").addEventListener("change", scheduleRender);
-  fillHonorifics();
+  $("ulToggle").addEventListener("change", () => { userUnderline = $("ulToggle").checked; scheduleRender(); });
+  fillHonorifics(); syncUnderlineToggle();
   (async () => {
     render();                                      // 先畫一次，畫面不空白
     try {
@@ -1025,7 +1033,7 @@ button.small { padding: 4px 10px; font-size: 12px; }
       if (res.ok) { state.official = normalizeConfig(mergeConfig(CI_DEFAULT, await res.json())); state.officialSource = "config/ci.json"; }
     } catch (e) { /* 沒有 ci.json（例如示範頁）就用內建預設 */ }
     state.ci = clone(state.official);
-    fillHonorifics();
+    fillHonorifics(); syncUnderlineToggle();
     await applyOfficialTemplate();
     scheduleRender();
   })();
