@@ -5,13 +5,13 @@
     "format": "jpg",
     "quality": 0.92
   },
-  "templateSrc": "template/1791791873281-PORSCHE-Carrera-GT-Grant-Larson-EDM-1008.jpg",
+  "templateSrc": "template/1791797592447-_PORSCHE-Carrera-GT-Grant-Larson-EDM-1008.jpg",
   "github": {
     "owner": "bjdisk",
     "repo": "FY26PTW_INV_NAME_TOOL",
     "branch": "main"
   },
-  "devPasscodeHash": "0a0667865bc17f9d624bcf11088057bbab46336e7dae65f3d5366f4f7a18333e",
+  "devPasscodeHash": "0254ee79ad06556d3833739480f992018f5b00513d1f291c99f89a16ef43ca21",
   "name": {
     "latinFont": "Porsche Next",
     "cjkFont": "DFHei Medium P",
@@ -34,7 +34,7 @@
     "honorificSeparator": " ",
     "underline": false,
     "underlineColor": "#A62F29",
-    "underlineWidth": 2,
+    "underlineWidth": 2.5,
     "underlineOffset": 12,
     "underlineExtend": 0
   }
